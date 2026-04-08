@@ -1,5 +1,7 @@
 # Nosana x ElizaOS Agent Challenge
 
+![ElizaOS](./assets/NosanaXEliza.jpg)
+
 Build your own **personal AI agent** using [ElizaOS](https://elizaos.com) and deploy it on the [Nosana](https://nosana.com) decentralized compute network. Win a share of **$3,000 USDC** in prizes.
 
 ---
