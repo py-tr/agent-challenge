@@ -189,21 +189,35 @@ export async function insertDecision(
   };
 
   await db.insert(decisions).values(row);
-  return row;
+  return { ...row, title: null, itemType: null };
 }
 
-/** Most recent decisions first, used by DecisionHistory UI and pattern summary. */
+/** Most recent decisions first, joined with action_items for title + type. */
 export async function getDecisions(
   db: Db,
   limit = 20
 ): Promise<Decision[]> {
   const rows = await db
-    .select()
+    .select({
+      id:           decisions.id,
+      actionItemId: decisions.actionItemId,
+      decision:     decisions.decision,
+      reason:       decisions.reason,
+      decidedAt:    decisions.decidedAt,
+      title:        actionItems.title,
+      itemType:     actionItems.type,
+    })
     .from(decisions)
+    .leftJoin(actionItems, eq(decisions.actionItemId, actionItems.id))
     .orderBy(desc(decisions.decidedAt))
     .limit(limit);
-  // Drizzle infers decision as `string`; cast to the narrower DecisionValue.
-  return rows.map((r) => ({ ...r, decision: r.decision as DecisionValue }));
+
+  return rows.map((r) => ({
+    ...r,
+    decision: r.decision as DecisionValue,
+    title:    r.title ?? null,
+    itemType: r.itemType ?? null,
+  }));
 }
 
 export async function countDecisions(db: Db): Promise<number> {

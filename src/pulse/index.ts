@@ -23,6 +23,8 @@ import { processEmailsAction } from "./actions/ProcessEmailsAction.js";
 import { detectConflictsAction } from "./actions/DetectConflictsAction.js";
 import { slibGuardEvaluator } from "./evaluators/SlibGuardEvaluator.js";
 import { pulseRoutes } from "./routes/pulseRoutes.js";
+import { actionQueueProvider } from "./providers/ActionQueueProvider.js";
+import { decisionHistoryProvider } from "./providers/DecisionHistoryProvider.js";
 
 // ─── Chat Completions Shim ────────────────────────────────────────────────────
 
@@ -140,7 +142,7 @@ export const pulsePlugin: Plugin = {
   actions: [processEmailsAction, detectConflictsAction],
 
   // ── Providers ────────────────────────────────────────────────────────────────
-  providers: [],
+  providers: [actionQueueProvider, decisionHistoryProvider],
 
   // ── Evaluators ───────────────────────────────────────────────────────────────
   evaluators: [slibGuardEvaluator],

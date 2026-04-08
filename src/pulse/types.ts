@@ -71,6 +71,9 @@ export interface Decision {
   decision: DecisionValue;
   reason: string | null; // Optional rejection reason
   decidedAt: string;     // ISO datetime
+  // Joined from action_items — populated by getDecisions()
+  title: string | null;
+  itemType: string | null;
 }
 
 // ─── Convenience ─────────────────────────────────────────────────────────────
