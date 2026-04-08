@@ -45,6 +45,10 @@ RUN pnpm compile
 #    dist/ already exists; Vite's emptyOutDir:true only wipes dist/frontend/).
 RUN cd frontend && pnpm run build
 
+# ── Debug: verify dist/ contents after build ─────────────────────────────────
+RUN echo "=== /app/dist/ ===" && ls -la /app/dist/ && \
+    echo "=== /app/dist/frontend/ ===" && ls -la /app/dist/frontend/ || echo "dist/frontend/ NOT FOUND"
+
 # ── Runtime ───────────────────────────────────────────────────────────────────
 RUN mkdir -p /app/data
 
