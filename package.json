@@ -8,10 +8,12 @@
     "dev": "elizaos dev --character ./characters/agent.character.json"
   },
   "dependencies": {
+    "@electric-sql/pglite": "0.3.16",
     "@elizaos/core": "^1.0.0",
     "@elizaos/plugin-anthropic": "^1.5.12",
     "@elizaos/plugin-bootstrap": "^1.0.0",
-    "@elizaos/plugin-openai": "^1.0.0"
+    "@elizaos/plugin-openai": "^1.0.0",
+    "drizzle-orm": "0.45.2"
   },
   "devDependencies": {
     "@elizaos/cli": "^1.0.0",
