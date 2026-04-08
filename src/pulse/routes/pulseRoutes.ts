@@ -48,7 +48,7 @@ import { CalendarMcpService } from "../services/CalendarMcpService.js";
 // not process.cwd() which varies depending on how ElizaOS launches the agent.
 const __dirname = dirname(fileURLToPath(import.meta.url));
 /** Resolved path to the built React SPA (dist/frontend/ from project root). */
-const FRONTEND_DIR = resolve(__dirname, "../../dist/frontend");
+const FRONTEND_DIR = resolve(__dirname, "../../../dist/frontend");
 
 /** Content-Type mapping for files emitted by Vite. */
 const MIME: Record<string, string> = {
@@ -168,6 +168,8 @@ export const pulseRoutes: Route[] = [
     name: "Pulse Dashboard",
     handler: async (_req: RouteRequest, res: RouteResponse, _runtime: IAgentRuntime) => {
       const indexPath = join(FRONTEND_DIR, "index.html");
+      console.log("[Pulse:Dashboard] FRONTEND_DIR:", FRONTEND_DIR);
+      console.log("[Pulse:Dashboard] index.html exists:", existsSync(indexPath));
       if (!existsSync(indexPath)) {
         // Frontend has not been built yet — return a helpful error instead of a blank 404.
         res.status(503).send(
