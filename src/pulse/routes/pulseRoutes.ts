@@ -24,7 +24,8 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { resolve, extname, join } from "node:path";
+import { resolve, extname, join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { MemoryType, type Route, type RouteRequest, type RouteResponse, type IAgentRuntime } from "@elizaos/core";
 import { getMetrics } from "../lib/nosanaMetrics.js";
 import {
@@ -43,8 +44,11 @@ import { CalendarMcpService } from "../services/CalendarMcpService.js";
 
 // ─── Frontend static-file serving ────────────────────────────────────────────
 
+// Resolve relative to the compiled file (dist/pulse/routes/pulseRoutes.js),
+// not process.cwd() which varies depending on how ElizaOS launches the agent.
+const __dirname = dirname(fileURLToPath(import.meta.url));
 /** Resolved path to the built React SPA (dist/frontend/ from project root). */
-const FRONTEND_DIR = resolve(process.cwd(), "dist/frontend");
+const FRONTEND_DIR = resolve(__dirname, "../../dist/frontend");
 
 /** Content-Type mapping for files emitted by Vite. */
 const MIME: Record<string, string> = {
