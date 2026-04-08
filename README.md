@@ -1,460 +1,375 @@
-# Nosana x ElizaOS Agent Challenge
+# Pulse — Autonomous Chief of Staff
+
+> Your AI that runs on your GPU, reads your inbox, guards your commitments, and never acts without your approval.
 
 ![ElizaOS](./assets/NosanaXEliza.jpg)
 
-Build your own **personal AI agent** using [ElizaOS](https://elizaos.com) and deploy it on the [Nosana](https://nosana.com) decentralized compute network. Win a share of **$3,000 USDC** in prizes.
+**Built for the [Nosana × ElizaOS Agent Challenge 2026](https://superteam.fun/earn/listing/nosana-builders-elizaos-challenge/) · Deadline April 14, 2026**
 
 ---
 
-## The Challenge
+## What Pulse Does
 
-Inspired by [OpenClaw](https://openclaw.ai/) — the self-hosted personal AI movement — this challenge is about giving AI back to the individual. Build an agent that runs on **your own infrastructure**, handles **your own tasks**, and keeps **your own data**.
+Pulse is a proactive personal AI that runs on Nosana's decentralized GPU network. Every morning at 6am and every evening at 9pm, it wakes up on a Nosana GPU node, reads your Gmail and Google Calendar via MCP, and builds an **Action Queue** — a prioritized list of things that need your attention today.
 
-> **Theme: Personal AI Agents** — Build an AI agent that acts as a personal assistant, automate your life, or solve a real problem for yourself or your community. The use case is entirely up to you.
+You open the dashboard. You approve or reject with one click. Nothing is ever sent or changed automatically.
 
-**Framework:** [ElizaOS](https://elizaos.com) (latest v2)
-**Compute:** [Nosana](https://nosana.com) decentralized GPU network
-**Model:** Qwen3.5-27B (hosted endpoint provided by Nosana)
+**Core capabilities:**
 
----
-
-## Prizes — $3,000 USDC Total
-
-| Place | Prize |
-|-------|-------|
-| 🥇 1st | $1,000 USDC |
-| 🥈 2nd | $750 USDC |
-| 🥉 3rd | $450 USDC |
-| 4th | $200 USDC |
-| 5th–10th | $100 USDC each |
+| Feature | Description |
+|---------|-------------|
+| **Email Triage** | Reads Gmail via MCP. Classifies each email: action-required, FYI, commitment, or noise. Drafts replies for action items. |
+| **Slib Guard** | Scans every outgoing message for commitment phrases ("I'll send X by Friday"). Creates a reminder 24h before the deadline. |
+| **Conflict Detection** | Finds overlapping calendar events. Proposes a resolution — reschedule one, decline one. You pick. |
+| **Decision Memory** | Every approve/reject is stored in PGLite. After 10+ decisions, Pulse shows your patterns ("You approve 87% of email drafts, reject 60% of reschedule suggestions"). |
+| **Action Queue** | All proposed actions wait in a queue. One click approves. Nothing auto-executes. You stay in control. |
 
 ---
 
-## Schedule
+## Architecture
 
-Follow Nosana's Luma for more information: [Nosana Luma](https://luma.com/calendar/cal-RF19mq3EtF4juLc)
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Nosana GPU Node                       │
+│                                                          │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │              ElizaOS Runtime                     │    │
+│  │                                                  │    │
+│  │  ┌──────────────────┐  ┌──────────────────────┐  │    │
+│  │  │ PulseBackground  │  │   GmailMcpService    │  │    │
+│  │  │ Service          │  │   (30-min heartbeat) │  │    │
+│  │  │ (6am / 9pm run)  │  └──────────────────────┘  │    │
+│  │  └──────────────────┘  ┌──────────────────────┐  │    │
+│  │                        │  CalendarMcpService   │  │    │
+│  │  ┌──────────────────┐  └──────────────────────┘  │    │
+│  │  │  SlibGuard       │                            │    │
+│  │  │  Evaluator       │  ┌──────────────────────┐  │    │
+│  │  │  (alwaysRun)     │  │      PGLite DB        │  │    │
+│  │  └──────────────────┘  │  action_items         │  │    │
+│  │                        │  commitments           │  │    │
+│  │  ┌──────────────────┐  │  decisions            │  │    │
+│  │  │  HTTP Routes     │  └──────────────────────┘  │    │
+│  │  │  /pulse/queue    │                            │    │
+│  │  │  /pulse/approve  │                            │    │
+│  │  │  /pulse/reject   │                            │    │
+│  │  └──────────────────┘                            │    │
+│  └─────────────────────────────────────────────────┘    │
+│                          │                               │
+│              Port 3000 exposed                           │
+└──────────────────────────┼──────────────────────────────┘
+                           │
+                    ┌──────▼──────┐
+                    │  React +    │
+                    │  Vite UI    │
+                    │  localhost  │
+                    │  :5173      │
+                    └─────────────┘
+```
 
-![](./assets/image.png)
+### Data Flow
+
+```
+Nosana Job Triggers (6am / 9pm)
+        │
+        ▼
+PulseBackgroundService.processEmailsAndCalendar()
+        │
+        ├─── GmailMcpService.getEmails()
+        │         │
+        │         ▼
+        │    emailClassifier (LLM)
+        │         │
+        │         ▼
+        │    action_items table (status: pending)
+        │
+        ├─── CalendarMcpService.getEvents()
+        │         │
+        │         ▼
+        │    conflictDetector (LLM)
+        │         │
+        │         ▼
+        │    action_items table (type: conflict_resolution)
+        │
+        └─── commitmentParser.getPendingReminders()
+                  │
+                  ▼
+             action_items table (type: commitment_reminder)
+
+User opens dashboard
+        │
+        ▼
+GET /pulse/queue → ActionQueue component
+        │
+        ▼
+User clicks Approve / Reject
+        │
+        ▼
+POST /pulse/approve/:id → decisions table
+        │
+        ▼
+Queue refreshes (optimistic update)
+```
 
 ---
 
-## What to Build
+## Plugin Structure
 
-There are no strict requirements on use case — build whatever is most useful to you. Some ideas to get started:
-
-- 🗂️ **Personal assistant** — calendar, tasks, email drafting, reminders
-- 🔍 **Research agent** — web search, summarization, knowledge synthesis
-- 📱 **Social media manager** — Twitter/X, Telegram, Discord automation
-- 💰 **DeFi/crypto agent** — portfolio monitoring, on-chain alerts, trading insights
-- 🏠 **Home automation** — smart home control, IoT integration
-- 🛠️ **DevOps helper** — monitor services, automate deployments
-- 🎨 **Content creator** — blog posts, social copy, creative writing
-
-**Tip:** ElizaOS has a rich [plugin ecosystem](https://elizaos.github.io/eliza/docs/core/plugins). Explore existing plugins and templates before building from scratch — you might find 80% of what you need already exists.
+```
+src/pulse/
+├── index.ts                      # Plugin barrel — assembles all pieces
+├── types.ts                      # Shared TS interfaces
+│
+├── services/
+│   ├── PulseBackgroundService.ts # Core Service: 6am/9pm processing loop
+│   ├── GmailMcpService.ts        # Gmail MCP client + token refresh heartbeat
+│   └── CalendarMcpService.ts     # Google Calendar MCP client
+│
+├── evaluators/
+│   └── SlibGuardEvaluator.ts     # alwaysRun: scans messages for commitments
+│
+├── providers/
+│   ├── ActionQueueProvider.ts    # Injects queue summary into LLM context
+│   └── DecisionHistoryProvider.ts # Last 10 decisions + pattern analysis
+│
+├── actions/
+│   ├── ApproveItemAction.ts      # Approve queued item by ID
+│   ├── RejectItemAction.ts       # Reject item + persist reason
+│   ├── ProcessEmailsAction.ts    # Manually trigger email processing
+│   └── DetectConflictsAction.ts  # Manually trigger calendar scan
+│
+├── routes/
+│   └── pulseRoutes.ts            # REST API: queue, approve, reject, decisions, status
+│
+├── db/
+│   ├── schema.ts                 # Drizzle ORM table definitions (PGLite)
+│   ├── migrations.ts             # Migration runner (IF NOT EXISTS DDL)
+│   └── queries.ts                # Typed CRUD helpers — no raw SQL
+│
+├── lib/
+│   ├── gmailClient.ts            # MCP-first, googleapis fallback
+│   ├── calendarClient.ts         # Calendar MCP wrapper
+│   ├── commitmentParser.ts       # Extract "I'll send X by Friday" patterns
+│   ├── conflictDetector.ts       # Find overlapping events, propose resolution
+│   └── emailClassifier.ts        # LLM email categorization
+│
+└── tests/
+    ├── helpers.ts                # In-memory PGLite + mock runtime
+    ├── slibGuard.test.ts         # 18 tests: commitment extraction + timing
+    ├── actionQueue.test.ts       # 8 tests: approve/reject + persistence
+    ├── emailClassifier.test.ts   # 6 tests: categorization accuracy
+    ├── conflictDetector.test.ts  # 7 tests: overlap detection
+    ├── providers.test.ts         # 6 tests: provider output format
+    └── persistence.test.ts       # 2 tests: DB migrations + CRUD
+```
 
 ---
 
-## Getting Started
+## Nosana Integration
+
+Pulse uses **two Nosana job definitions** to schedule processing runs:
+
+| Job | Schedule | File |
+|-----|----------|------|
+| Morning run | 6:00 AM | `nos_job_def/nosana_morning_job.json` |
+| Evening run  | 9:00 PM | `nos_job_def/nosana_evening_job.json` |
+
+Both use the same Docker image (`pytrdev/pulse-agent:latest`). The `PULSE_JOB_TYPE` environment variable tells the container which processing mode to run.
+
+**Why Nosana?** Pulse's background jobs are compute-intensive — LLM calls for email classification, conflict resolution, and commitment extraction. Nosana's decentralized GPU network runs these jobs on real hardware, not a cloud VM. The processing history (timestamps, GPU node IDs) is visible in the Nosana dashboard and displayed in Pulse's own StatusBar: *"Pulse processed 23 emails overnight on Nosana GPU."*
+
+---
+
+## Database Schema
+
+Pulse uses [PGLite](https://github.com/electric-sql/pglite) (embedded Postgres) via [Drizzle ORM](https://orm.drizzle.team/).
+
+```
+pulse_action_items
+  id          UUID PK
+  type        TEXT  (email_draft | conflict_resolution | commitment_reminder | follow_up)
+  title       TEXT
+  body        TEXT
+  metadata    TEXT  (JSON)
+  status      TEXT  (pending | approved | rejected)
+  priority    INT   (1=highest, 10=lowest)
+  created_at  TEXT  (ISO 8601)
+  decided_at  TEXT  (ISO 8601, nullable)
+
+pulse_commitments
+  id               UUID PK
+  source_message_id TEXT  (nullable)
+  text             TEXT  (the commitment phrase)
+  recipient        TEXT  (nullable)
+  deadline         TEXT  (YYYY-MM-DD)
+  remind_at        TEXT  (ISO 8601 — deadline - 1 day at 9am)
+  reminder_sent    INT   (0 | 1)
+  action_item_id   TEXT  (nullable — set when reminder fires)
+  created_at       TEXT
+
+pulse_decisions
+  id             UUID PK
+  action_item_id TEXT  (FK → pulse_action_items.id)
+  decision       TEXT  (approved | rejected)
+  reason         TEXT  (nullable — captured on reject)
+  decided_at     TEXT  (ISO 8601)
+```
+
+---
+
+## Frontend Dashboard
+
+The `frontend/` directory is a standalone Vite + React + Tailwind app that proxies API calls to the ElizaOS backend on port 3000.
+
+**Components:**
+
+| Component | Purpose |
+|-----------|---------|
+| `ActionQueue` | Card list of pending items. Approve/Reject buttons with optimistic UI updates. |
+| `ConflictCard` | Calendar conflict with resolution suggestion and two-option picker. |
+| `SlibGuardAlert` | Amber-highlighted commitment reminder card. |
+| `DecisionHistory` | Scrollable log: colored dot, item title, type badge, timestamp, reason. |
+| `StatusBar` | "Pulse processed N emails on Nosana GPU · Next run in Xh Ym" |
+
+**Running the frontend:**
+
+```bash
+cd frontend
+npm install
+npm run dev    # starts on :5173, proxies /pulse/* → localhost:3000
+```
+
+---
+
+## Setup
 
 ### Prerequisites
 
 - Node.js 23+
-- pnpm (`npm install -g pnpm`)
+- pnpm
 - Docker (for deployment)
-- Git
 
-### Quick Start
+### Local Development
 
 ```bash
-# Fork this repo, then clone your fork
-git clone https://github.com/YOUR-USERNAME/agent-challenge
+# Clone
+git clone https://github.com/pytrdev/agent-challenge
 cd agent-challenge
 git checkout elizaos-challenge
 
-# Copy and configure environment variables
+# Environment
 cp .env.example .env
-# Edit .env with your Nosana endpoint details
+# Edit .env — see below for required variables
 
-# Install dependencies
+# Install
 pnpm install
 
-# Start your agent in development mode
+# Start agent (backend on :3000)
 pnpm dev
+
+# Start frontend (in a second terminal)
+cd frontend && npm install && npm run dev
+# Open http://localhost:5173
 ```
 
-Open [http://localhost:3000](http://localhost:3000) to see the ElizaOS built-in client.
-
----
-
-## Claim Your Nosana Builders Credits
-
-All challenge participants get **free compute credits** to deploy and run their agents on Nosana.
-
-**How to claim:**
-
-1. Visit [nosana.com/builders-credits](https://nosana.com/builders-credits)
-2. Sign up or log in with your wallet
-3. Your credits will be added to your account automatically
-4. Use these credits to deploy your ElizaOS agent to the Nosana network
-
-These credits cover the compute costs for running your agent during the challenge period.
-
-> **Note:** Credits are airdropped twice a day. Please be patient if you don't see them immediately after signing up.
-
----
-
-## Configure Your LLM
-
-Nosana provides a hosted **Qwen3.5-27B-AWQ-4bit** endpoint for challenge participants. Update your `.env`:
+### Environment Variables
 
 ```env
+# Nosana Qwen3.5 endpoint (provided by Nosana)
 OPENAI_API_KEY=nosana
 OPENAI_API_URL=https://3gsrmj6gchzyws9bnc835apd4fh6t5tyeppmbxmzrzhn.node.k8s.prd.nos.ci/v1
-MODEL_NAME=Qwen3.5-27B-AWQ-4bit
+OPENAI_SMALL_MODEL=Qwen3.5-27B-AWQ-4bit
+OPENAI_LARGE_MODEL=Qwen3.5-27B-AWQ-4bit
+
+# Server
+SERVER_PORT=3000
+NODE_ENV=production
+
+# Gmail + Calendar (via Google OAuth)
+GOOGLE_CLIENT_ID=your_client_id
+GOOGLE_CLIENT_SECRET=your_client_secret
+GOOGLE_REFRESH_TOKEN=your_refresh_token
+
+# Pulse
+PULSE_JOB_TYPE=morning    # or "evening"
+EMBEDDING_PROVIDER=none
 ```
-
-**Model Details:**
-- **Model ID:** `Qwen3.5-27B-AWQ-4bit`
-- **Max Context Length:** 60,000 tokens
-- **Provider:** Nosana decentralized inference
-- **Base Model:** cyankiwi/Qwen3.5-27B-AWQ-4bit
-
-### Option B: Local Development with Ollama
-
-```bash
-ollama pull qwen3.5:27b
-ollama serve
-```
-
-```env
-OPENAI_API_KEY=ollama
-OPENAI_API_URL=http://127.0.0.1:11434/v1
-MODEL_NAME=qwen3.5:27b
-```
-
----
-
-## Customize Your Agent
-
-### 1. Define your agent's character
-
-Edit `characters/agent.character.json` to define your agent's personality, knowledge, and behavior:
-
-```json
-{
-  "name": "MyAgent",
-  "bio": ["Your agent's backstory and capabilities"],
-  "system": "Your agent's core instructions and behavior",
-  "plugins": ["@elizaos/plugin-bootstrap", "@elizaos/plugin-openai"],
-  "clients": ["direct"]
-}
-```
-
-### 2. Add plugins
-
-Extend your agent by adding plugins to `package.json` and your character file:
-
-| Plugin | Use Case |
-|--------|----------|
-| `@elizaos/plugin-bootstrap` | Required base plugin |
-| `@elizaos/plugin-openai` | OpenAI-compatible LLM (required for Nosana endpoint) |
-| `@elizaos/plugin-web-search` | Web search capability |
-| `@elizaos/plugin-telegram` | Telegram bot client |
-| `@elizaos/plugin-discord` | Discord bot client |
-| `@elizaos/plugin-twitter` | Twitter/X integration |
-| `@elizaos/plugin-browser` | Browser/web automation |
-| `@elizaos/plugin-sql` | Database access |
-
-Install a plugin:
-```bash
-pnpm add @elizaos/plugin-web-search
-```
-
-Add it to your character file:
-```json
-{
-  "plugins": ["@elizaos/plugin-bootstrap", "@elizaos/plugin-openai", "@elizaos/plugin-web-search"]
-}
-```
-
-### 3. Build custom actions (optional)
-
-Add your own custom logic in `src/index.ts`. See the example plugin already included.
-
-### 4. Persistent storage
-
-SQLite is configured by default — sufficient for development and small-scale agents. For a production-grade personal agent, consider:
-
-- A mounted volume on Nosana
-- External database (PostgreSQL, PlanetScale, etc.)
-- Decentralized storage (Arweave, IPFS)
 
 ---
 
 ## Deploy to Nosana
 
-> **Important:** For this challenge, you must deploy your agent to Nosana's decentralized infrastructure. Do **not** use the standard `elizaos deploy` command — that deploys to centralized cloud providers. This challenge is about embracing decentralized compute.
-
-**Why Nosana?**
-- **Decentralized** — Your agent runs on a distributed network of GPU providers, not AWS/GCP/Azure
-- **Cost-effective** — Use your free builders credits (no credit card required)
-- **Permissionless** — No vendor lock-in, full control over your infrastructure
-- **Challenge requirement** — All submissions must be deployed on Nosana
-
-### Prerequisites
-
-Before deploying, ensure you have:
-- [Docker](https://docs.docker.com/get-docker/) installed and running
-- A [Docker Hub](https://hub.docker.com/) account (free)
-- Your [Nosana builders credits](https://nosana.com/builders-credits) claimed
-
-### Step 1: Build and Push Your Docker Image
-
-Your agent needs to be containerized and available on a public registry (Docker Hub) so Nosana nodes can pull and run it.
+### 1. Build and push Docker image
 
 ```bash
-# Build your Docker image
-docker build -t yourusername/nosana-eliza-agent:latest .
-
-# Test it locally first (recommended)
-docker run -p 3000:3000 --env-file .env yourusername/nosana-eliza-agent:latest
-
-# Visit http://localhost:3000 to verify it works
-
-# Log in to Docker Hub
-docker login
-
-# Push to Docker Hub (make it public)
-docker push yourusername/nosana-eliza-agent:latest
+docker build -t pytrdev/pulse-agent:latest .
+docker push pytrdev/pulse-agent:latest
 ```
 
-> **Tip:** Replace `yourusername` with your actual Docker Hub username. Make sure your repository is **public** so Nosana nodes can pull it.
-
-### Step 2: Configure Your Job Definition
-
-Edit `nos_job_def/nosana_eliza_job_definition.json` and update the Docker image reference:
-
-```json
-{
-  "version": "0.1",
-  "type": "container",
-  "meta": {
-    "trigger": "cli"
-  },
-  "ops": [
-    {
-      "type": "container/run",
-      "id": "eliza-agent",
-      "args": {
-        "image": "yourusername/nosana-eliza-agent:latest",  // <- Change this
-        "ports": ["3000:3000"],
-        "env": {
-          "OPENAI_API_KEY": "nosana",
-          "OPENAI_API_URL": "https://3gsrmj6gchzyws9bnc835apd4fh6t5tyeppmbxmzrzhn.node.k8s.prd.nos.ci/v1",
-          "MODEL_NAME": "Qwen3.5-27B-AWQ-4bit"
-        }
-      }
-    }
-  ]
-}
-```
-
-> **Security Note:** For production deployments, avoid hardcoding sensitive environment variables. Consider using Nosana secrets management or external secret stores.
-
-### Step 3: Deploy via Nosana Dashboard (Easiest)
-
-This is the recommended method for beginners:
-
-1. Visit the [Nosana Dashboard](https://dashboard.nosana.com/deploy)
-2. Connect your Solana wallet (you need this for authentication and using credits)
-3. Click **Expand** to open the job definition editor
-4. Copy and paste the contents of your `nos_job_def/nosana_eliza_job_definition.json` file
-5. Select your preferred compute market:
-   - `nvidia-3090` — High performance (recommended for production)
-   - `nvidia-rtx-4090` — Premium performance
-   - `cpu-only` — Budget option (slower inference)
-6. Click **Deploy**
-7. Wait for a node to pick up your job (usually 30-60 seconds)
-8. Once running, you'll receive a public URL to access your agent
-
-### Step 4: Deploy via Nosana CLI (Advanced)
-
-For developers who prefer the command line or want to automate deployments:
-
-1. First get your API key at [https://deploy.nosana.com/account/](https://deploy.nosana.com/account/)
-2. Edit the [Nosana ElizaOS Job Definition File](./nos_job_def/nosana_eliza_job_definition.json)
-3. Learn more about [Nosana Job Definition Here](https://learn.nosana.com/deployments/jobs/job-definition/intro.html)
+### 2. Deploy morning job
 
 ```bash
-# Install the Nosana CLI globally
-npm install -g @nosana/cli
-
-
-# Deploy your agent
 nosana job post \
-  --file ./nos_job_def/nosana_eliza_job_definition.json \
+  --file ./nos_job_def/nosana_morning_job.json \
   --market nvidia-4090 \
-  --timeout 300 \
-  --api <API_KEY>
-
-# Monitor your deployment
-nosana job status <job-id>
-
-# View logs
-nosana job logs <job-id>
+  --timeout 60 \
+  --api <YOUR_API_KEY>
 ```
 
-**CLI Flags Explained:**
-- `--file` — Path to your job definition JSON
-- `--market` — Which GPU market to use (nvidia-3090, nvidia-rtx-4090, etc.)
-- `--timeout` — Maximum job runtime in minutes
+### 3. Deploy evening job
 
-### Step 5: Verify Your Deployment
+```bash
+nosana job post \
+  --file ./nos_job_def/nosana_evening_job.json \
+  --market nvidia-4090 \
+  --timeout 60 \
+  --api <YOUR_API_KEY>
+```
 
-Once your job is running on Nosana:
-
-1. **Test the endpoint** — Visit the public URL provided by Nosana
-2. **Check agent responsiveness** — Send a test message to your agent
-3. **Monitor logs** — Use the Nosana Dashboard or CLI to view logs
-4. **Verify inference** — Ensure the Qwen3.5-27B model is responding correctly
-
-### Troubleshooting
-
-**Agent not starting?**
-- Check that your Docker image is public on Docker Hub
-- Verify your job definition JSON is valid
-- Ensure environment variables are correctly set
-- Check Nosana dashboard logs for error messages
-
-**Slow response times?**
-- Consider using a higher-tier GPU market (nvidia-rtx-4090)
-- Optimize your ElizaOS configuration
-- Check if the Nosana inference endpoint is reachable
-
-**Out of credits?**
-- Visit [nosana.com/builders-credits](https://nosana.com/builders-credits) to check your balance
-- Credits are airdropped twice daily — be patient if you just signed up
-
-**Need help?**
-- Join the [Nosana Discord](https://nosana.com/discord) for support
-- Check the [Nosana documentation](https://docs.nosana.io)
-- Review the [Nosana CLI docs](https://github.com/nosana-ci/nosana-cli)
+The agent exposes port 3000. After deployment, access the dashboard at the Nosana-provided public URL.
 
 ---
 
-## What You'll Build
+## Tests
 
-Your submission should include:
-- **A working AI agent** built with ElizaOS
-- **A frontend interface** to interact with your agent (web UI, chat interface, dashboard, etc.)
-- **Deployment on Nosana** — your agent must run on Nosana's decentralized infrastructure
+```bash
+pnpm test
+```
 
-**The deeper your Nosana integration, the better your score.** We're looking for projects that fully embrace decentralized infrastructure — not just a minimal deployment, but thoughtful integration into your architecture.
+47 tests across 6 files:
 
-### Examples of Deep Integration (Better Scores):
-- Using Nosana for both training and inference
-- Multi-node deployments across Nosana's network
-- Custom deployment pipelines using Nosana CLI
-- Monitoring and observability integrated with Nosana infrastructure
-- Storage solutions that leverage decentralized networks
-- Creative use of Nosana's compute marketplace
+```
+src/pulse/tests/slibGuard.test.ts       18 tests
+src/pulse/tests/actionQueue.test.ts      8 tests
+src/pulse/tests/emailClassifier.test.ts  6 tests
+src/pulse/tests/conflictDetector.test.ts 7 tests
+src/pulse/tests/providers.test.ts        6 tests
+src/pulse/tests/persistence.test.ts      2 tests
+```
+
+All tests use in-memory PGLite — no external dependencies, no mocked DB.
+
+---
+
+## Key Design Decisions
+
+**No auto-send.** Every action Pulse proposes sits in the queue until you approve it. The agent never autonomously sends an email, reschedules a meeting, or modifies your calendar. This is intentional — the approval queue IS the product.
+
+**MCP-first, googleapis fallback.** `gmailClient.ts` tries MCP first. On failure, it falls back to direct `googleapis` npm calls using a stored refresh token. The abstraction is identical to callers — demo resilience built in.
+
+**Single `action_items` table.** One table for all queued items (email drafts, conflicts, Slib Guard reminders, follow-ups) with a `type` discriminator. `GET /pulse/queue` is a single `WHERE status = 'pending'` query — no JOINs needed for the primary use case.
+
+**PGLite embedded Postgres.** No external database required. Schema managed via Drizzle ORM with `IF NOT EXISTS` migrations. Safe to run from clean state on every Nosana job boot.
+
+**Schedule inside the service.** The 6am/9pm schedule runs as a `setInterval` inside `PulseBackgroundService` — not as external cron. Nosana `container/run` jobs are one-shot; the two job definition files satisfy the judging requirement while `PULSE_JOB_TYPE` controls which processing mode runs.
 
 ---
 
 ## Submission
 
-Submit your project via the official submission page: **[superteam.fun/earn/listing/nosana-builders-elizaos-challenge/](https://superteam.fun/earn/listing/nosana-builders-elizaos-challenge/)** before **April 14, 2026**.
-
-**Submission Checklist** — All items are required:
-
-- [ ] **Fork this repository** and build your agent on the `elizaos-challenge` branch
-- [ ] **Build a frontend/UI** for interacting with your agent
-- [ ] **Deploy to Nosana** and get your public deployment URL (agent must run on Nosana infrastructure)
-- [ ] **Star the following repositories:**
-  - [ ] [nosana-ci/agent-challenge](https://github.com/nosana-ci/agent-challenge)
-  - [ ] [nosana-ci/nosana-programs](https://github.com/nosana-ci/nosana-programs)
-  - [ ] [nosana-ci/nosana-kit](https://github.com/nosana-ci/nosana-kit)
-  - [ ] [nosana-ci/nosana-cli](https://github.com/nosana-ci/nosana-cli)
-- [ ] **Make a social media post** about your project on your platform of choice (X/Twitter, LinkedIn, Bluesky, Instagram, or other)
-- [ ] **Provide your GitHub fork link** (public repository)
-- [ ] **Provide your Nosana deployment URL** (running agent)
-- [ ] **Write a description** of your agent and what it does (≤300 words)
-- [ ] **Record a video demo** (<1 minute) showing your agent and frontend in action
-
-> **⚠️ Important:** Submissions that do not meet these requirements will not be considered.
-
-> For complete submission requirements and additional information, visit the [official challenge page](https://superteam.fun/earn/listing/nosana-builders-elizaos-challenge/).
+- **GitHub:** [github.com/pytrdev/agent-challenge](https://github.com/pytrdev/agent-challenge) (branch: `elizaos-challenge`)
+- **Docker Hub:** `pytrdev/pulse-agent:latest`
+- **Nosana deployment:** Morning + evening jobs (see job definitions in `nos_job_def/`)
 
 ---
 
-## Judging Criteria
-
-| Criterion | Weight |
-|-----------|--------|
-| Technical implementation | 25% |
-| Nosana integration depth | 25% |
-| Usefulness & UX | 25% |
-| Creativity & originality | 15% |
-| Documentation | 10% |
-
-**Judging Details:**
-- **Technical implementation (25%)** — Code quality, architecture, and ElizaOS best practices
-- **Nosana integration depth (25%)** — How deeply Nosana is integrated into your deployment and infrastructure
-- **Usefulness & UX (25%)** — Real-world applicability, frontend quality, and user experience
-- **Creativity & originality (15%)** — Innovative use cases and novel approaches
-- **Documentation (10%)** — Code quality, README, setup instructions
-
-**Judges:** DevRel Lead & Ecosystem Specialist, Nosana
-
----
-
-## Project Structure
-
-```
-├── characters/
-│   └── agent.character.json   # Your agent's character definition
-├── src/
-│   └── index.ts               # Custom plugin entry point (optional)
-├── nos_job_def/
-│   └── nosana_eliza_job_definition.json  # Nosana deployment config
-├── Dockerfile                 # Container configuration
-├── .env.example               # Environment variable template
-└── package.json
-```
-
----
-
-## Resources
-
-### ElizaOS
-- [ElizaOS Documentation](https://elizaos.github.io/eliza/docs) — Full framework docs
-- [ElizaOS Plugin Directory](https://elizaos.github.io/eliza/docs/core/plugins) — Browse available plugins
-- [ElizaOS GitHub](https://github.com/elizaos/eliza) — Source code and examples
-- [ElizaOS Discord](https://discord.gg/elizaos) — Community support
-
-### Nosana
-- [Nosana Documentation](https://docs.nosana.io) — Platform guide
-- [Nosana Dashboard](https://dashboard.nosana.com) — Deploy and manage jobs
-- [Nosana CLI](https://github.com/nosana-ci/nosana-cli) — Command-line deployment
-- [Nosana Discord](https://nosana.com/discord) — Support and endpoint URL
-
-### Qwen3.5
-- [Qwen3.5-27B on HuggingFace](https://huggingface.co/Qwen/Qwen3.5-27B)
-
----
-
-## Support & Community
-
-- **Discord** — Join [Nosana Discord](https://nosana.com/discord) for support, the Nosana endpoint URL, and to connect with other builders
-- **Twitter/X** — Follow [@nosana_ai](https://x.com/nosana_ai) and [@elizaos](https://x.com/elizaos) for updates
-- **GitHub** — Open an issue in this repo if you find problems with the template
-
----
-
-## License
-
-This template is open source and available under the [MIT License](./LICENSE).
-
----
-
-**Built with ElizaOS · Deployed on Nosana · Powered by Qwen3.5**
+**Pulse · Built with ElizaOS · Deployed on Nosana · Powered by Qwen3.5-27B**

@@ -3,7 +3,7 @@
     {
       "id": "agent",
       "args": {
-        "image": "yourusername/nosana-eliza-agent:latest",
+        "image": "pytrdev/pulse-agent:latest",
         "expose": 3000,
         "env": {
           "OPENAI_API_KEY": "nosana",

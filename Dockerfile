@@ -8,7 +8,13 @@ RUN apt-get update && apt-get install -y \
   make \
   g++ \
   git \
+  curl \
+  unzip \
   && rm -rf /var/lib/apt/lists/*
+
+# Install bun (required by elizaos CLI)
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:$PATH"
 
 # Disable telemetry
 ENV ELIZAOS_TELEMETRY_DISABLED=true

@@ -5,7 +5,7 @@
       "id": "pulse-morning",
       "type": "container/run",
       "args": {
-        "image": "makrelosak/pulse-agent:latest",
+        "image": "pytrdev/pulse-agent:latest",
         "expose": 3000,
         "env": {
           "OPENAI_API_KEY": "nosana",
