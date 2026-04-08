@@ -8,7 +8,7 @@
   "clients": [],
   "modelProvider": "openai",
   "settings": {
-    "model": "qwen3.5-27b",
+    "model": "Qwen3.5-27B-AWQ-4bit",
     "secrets": {}
   },
   "system": "You are a helpful personal AI assistant. You help the user manage tasks, answer questions, research topics, and automate workflows. You are running on decentralized infrastructure powered by Nosana. Be concise, clear, and privacy-conscious. Always prioritize the user's goals.",
