@@ -1,24 +1,11 @@
-import { createOllama } from "ollama-ai-provider";
 import { Agent } from '@mastra/core/agent';
 import { Memory } from '@mastra/memory';
 import { LibSQLStore } from '@mastra/libsql';
 import { weatherTool } from '../tools/weather-tool';
-import dotenv from 'dotenv'
+import { model } from '../config';
 
-dotenv.config()
-
-const modelName = process.env.MODEL_NAME_AT_ENDPOINT;
-const baseURL = process.env.API_BASE_URL;
-
-const ollama = createOllama({
-  baseURL,
-  // ...otherOptions,
-});
-
-
-export const weatherAgent = new Agent({
-  name: 'Weather Agent',
-  instructions: `
+const name = "Weather Agent"
+const instructions = `
       You are a helpful weather assistant that provides accurate weather information.
 
       Your primary function is to help users get weather details for specific locations. When responding:
@@ -29,15 +16,21 @@ export const weatherAgent = new Agent({
       - Keep responses concise but informative
 
       Use the weatherTool to fetch current weather data.
-`,
-  // How do I add environment Variables to this project?
-  model: ollama(modelName!, {
-    // ...otherOptions
-  }),
+`
+// const memory = new Memory({
+//   storage: new LibSQLStore({
+//     url: 'file:../mastra.db', // path is relative to the .mastra/output directory
+//   }),
+// }),
+
+
+export const weatherAgent = new Agent({
+  name,
+  instructions,
+  model,
+  // memory,
   tools: { weatherTool },
-  memory: new Memory({
-    storage: new LibSQLStore({
-      url: 'file:../mastra.db', // path is relative to the .mastra/output directory
-    }),
-  }),
 });
+
+
+
