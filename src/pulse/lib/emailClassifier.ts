@@ -214,12 +214,25 @@ function buildResult(
 function buildReplyDraft(msg: GmailMessage): string {
   // Extract name from "First Last <email>" format.
   const nameMatch = msg.from.match(/^([^<]+)</);
-  const firstName = nameMatch
-    ? nameMatch[1].trim().split(" ")[0]
-    : "there";
+  const senderName = nameMatch ? nameMatch[1].trim() : null;
+  const firstName  = senderName ? senderName.split(" ")[0] : "there";
+
+  // Strip display name to get bare email for the "ask Pulse" prompt.
+  const emailMatch = msg.from.match(/<([^>]+)>/);
+  const senderRef  = emailMatch
+    ? emailMatch[1]          // bare email: reply@example.com
+    : (senderName ?? msg.from);
 
   return (
+    `**From:** ${msg.from}\n` +
+    `**Subject:** ${msg.subject}\n\n` +
+    `---\n\n` +
+    `**Suggested reply scaffold:**\n\n` +
     `Hi ${firstName},\n\nThank you for your email regarding "${msg.subject}".\n\n` +
-    `[Your response here]\n\nBest regards,`
+    `[Your response here]\n\nBest regards,\n\n` +
+    `---\n\n` +
+    `**Approve** to mark this email as handled and log the decision.\n` +
+    `**Reject** to dismiss it from your queue.\n\n` +
+    `To send a reply, ask Pulse: _"Draft a reply to ${senderRef}"_`
   );
 }

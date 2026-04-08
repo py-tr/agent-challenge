@@ -25,7 +25,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve, extname, join } from "node:path";
-import type { Route, RouteRequest, RouteResponse, IAgentRuntime } from "@elizaos/core";
+import { MemoryType, type Route, type RouteRequest, type RouteResponse, type IAgentRuntime } from "@elizaos/core";
 import { getMetrics } from "../lib/nosanaMetrics.js";
 import {
   getQueue,
@@ -92,6 +92,61 @@ function ok(res: RouteResponse, data: unknown): void {
 
 function err(res: RouteResponse, message: string, status = 500): void {
   res.status(status).json({ error: message });
+}
+
+/**
+ * Persist an approval decision to the ElizaOS semantic memory store so the
+ * agent can recall past decisions when asked (e.g. "Have you seen emails like
+ * this before?"). We use the agent's own ID as the room since this is a
+ * system/self log rather than a user conversation.
+ *
+ * Failures are intentionally non-fatal — a memory write error should never
+ * prevent the HTTP response from succeeding.
+ */
+async function recordDecisionMemory(
+  runtime: IAgentRuntime,
+  params: {
+    decision: "approved" | "rejected";
+    actionItemId: string;
+    actionItemType: string;
+    title: string;
+    reason: string | null;
+  }
+): Promise<void> {
+  const { decision, actionItemId, actionItemType, title, reason } = params;
+  const text =
+    `Decision: ${decision.toUpperCase()} — [${actionItemType}] "${title}"` +
+    (reason ? ` | Reason: ${reason}` : "");
+
+  await runtime.createMemory(
+    {
+      entityId: runtime.agentId,
+      agentId:  runtime.agentId,
+      roomId:   runtime.agentId, // self-log room — no active conversation context
+      content: {
+        text,
+        source: "pulse-approval-queue",
+      },
+      metadata: {
+        type:           MemoryType.CUSTOM,
+        source:         "pulse-approval-queue",
+        scope:          "private",
+        decision,
+        actionItemId,
+        actionItemType,
+        title,
+        reason:         reason ?? undefined,
+        decidedAt:      new Date().toISOString(),
+      },
+    },
+    "messages",
+    false // non-unique: multiple decisions on different items can share similar text
+  ).catch((e: unknown) => {
+    console.warn(
+      `[Pulse:Routes] Failed to persist decision memory for item ${actionItemId}:`,
+      e instanceof Error ? e.message : String(e)
+    );
+  });
 }
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
@@ -191,6 +246,15 @@ export const pulseRoutes: Route[] = [
         await setActionItemStatus(db, id, "approved");
         await insertDecision(db, { actionItemId: id, decision: "approved", reason });
 
+        // Persist to ElizaOS semantic memory so the agent can recall this later.
+        void recordDecisionMemory(runtime, {
+          decision:       "approved",
+          actionItemId:   id,
+          actionItemType: item.type,
+          title:          item.title,
+          reason,
+        });
+
         console.log(`[Pulse:Routes] Approved item ${id}`);
         ok(res, { success: true, id, status: "approved" });
       } catch (e) {
@@ -226,6 +290,15 @@ export const pulseRoutes: Route[] = [
 
         await setActionItemStatus(db, id, "rejected");
         await insertDecision(db, { actionItemId: id, decision: "rejected", reason });
+
+        // Persist to ElizaOS semantic memory so the agent can recall this later.
+        void recordDecisionMemory(runtime, {
+          decision:       "rejected",
+          actionItemId:   id,
+          actionItemType: item.type,
+          title:          item.title,
+          reason,
+        });
 
         console.log(`[Pulse:Routes] Rejected item ${id}`);
         ok(res, { success: true, id, status: "rejected" });
