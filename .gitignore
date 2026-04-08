@@ -95,3 +95,6 @@ bun.lockb
 
 
 CONTEXT.md
+
+# Nosana confidential job definitions — contain Google OAuth credentials, never commit
+nos_job_def/*_confidential.json
