@@ -69,7 +69,7 @@ Or any other innovative AI agent idea at your skill level!
 
 ### Getting Started
 
-1. **Fork this repository** to your GitHub account
+1. **Fork the [Nosana Agent Challenge](https://github.com/nosana-ai/agent-challenge)** to your GitHub account
 2. **Clone your fork** locally
 3. **Install dependencies** with `pnpm install`
 4. **Run the development server** with `pnpm run dev`
@@ -139,7 +139,7 @@ docker push yourusername/agent-challenge:latest
 
 ##### Nosana Job Definition
 
-We have included a nosana job definition at <./nos_job_def/nosana_mastra.json>, that you can use to publish your agent to the Nosana network.
+We have included a Nosana job definition at <./nos_job_def/nosana_mastra.json>, that you can use to publish your agent to the Nosana network.
 
 **Deploying using [@nosana/cli](https://github.com/nosana-ci/nosana-cli/)**
 
@@ -149,7 +149,7 @@ We have included a nosana job definition at <./nos_job_def/nosana_mastra.json>, 
   - Retrieve your address with: `nosana address`
   - Go to our [Discord](https://nosana.com/discord) and ask for some NOS and SOL to publish your job.
 - Run: `nosana job post --file nosana_mastra.json --market nvidia-3060 --timeout 30`
-- Go to the dashboard[Nosana Dashboard](https://dashboard.nosana.com/deploy) to see your job
+- Go to the [Nosana Dashboard](https://dashboard.nosana.com/deploy) to see your job
 
 **Deploying using the [Nosana Dashboard](https://dashboard.nosana.com/deploy)**
 
@@ -221,6 +221,18 @@ Submissions will be evaluated based on:
    - Potential for adoption
    - Value proposition
 
+### Prizes
+
+We’re awarding the **top 10 submissions**:
+
+- 🥇 1st: $1,000 USDC
+- 🥈 2nd: $750 USDC
+- 🥉 3rd: $450 USDC
+- 🏅 4th: $200 USDC
+- 🔟 5th–10th: $100 USDC
+
+All prizes are paid out directly to participants on [SuperTeam](https://superteam.com)
+
 ### Resources
 
 - [Nosana Documentation](https://docs.nosana.io)
@@ -241,8 +253,11 @@ Submissions will be evaluated based on:
 - Keep your Docker images lightweight
 - Document all dependencies clearly
 - Make your code reproducible
+- You can vibe code it if you want 😉
 - **Only one submission per participant**
 - **Submissions that do not compile, and do not meet the specified requirements, will not be considered**
+- **Deadline is: 9 July 2025, 12.01 PM**
+- **Announcement will be announced about one week later, stay tuned for our socials for exact date**
 
 ### Don’t Miss Nosana Builder Challenge Updates
 
