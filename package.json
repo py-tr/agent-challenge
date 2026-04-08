@@ -3,9 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "dist/index.js",
   "scripts": {
-    "start": "elizaos start --character ./characters/agent.character.json",
-    "dev": "elizaos dev --character ./characters/agent.character.json"
+    "compile": "tsc",
+    "compile:watch": "tsc -w",
+    "start": "elizaos start",
+    "dev": "elizaos dev"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.3.16",
@@ -17,6 +20,7 @@
   },
   "devDependencies": {
     "@elizaos/cli": "^1.0.0",
+    "@types/node": "^22.0.0",
     "typescript": "^5.0.0"
   }
 }

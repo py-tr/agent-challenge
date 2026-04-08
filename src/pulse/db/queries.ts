@@ -197,11 +197,13 @@ export async function getDecisions(
   db: Db,
   limit = 20
 ): Promise<Decision[]> {
-  return db
+  const rows = await db
     .select()
     .from(decisions)
     .orderBy(desc(decisions.decidedAt))
     .limit(limit);
+  // Drizzle infers decision as `string`; cast to the narrower DecisionValue.
+  return rows.map((r) => ({ ...r, decision: r.decision as DecisionValue }));
 }
 
 export async function countDecisions(db: Db): Promise<number> {

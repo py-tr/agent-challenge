@@ -11,6 +11,7 @@
 
 import { pgTable, text, boolean, integer } from "drizzle-orm/pg-core";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 
 // ─── Tables ───────────────────────────────────────────────────────────────────
 
@@ -67,8 +68,10 @@ export const schema = { actionItems, commitments, decisions };
 
 /**
  * The typed Drizzle-over-PGLite database instance used throughout Pulse.
- * Import this type wherever you need a db parameter.
+ * The intersection with `{ $client: PGlite }` mirrors what drizzle() actually
+ * returns — PgliteDatabase alone doesn't carry $client, but the runtime
+ * object does (needed by migrations.ts to call pglite.close()).
  *
  *   import type { Db } from "../db/schema.js";
  */
-export type Db = PgliteDatabase<typeof schema>;
+export type Db = PgliteDatabase<typeof schema> & { $client: PGlite };
