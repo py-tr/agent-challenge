@@ -33,15 +33,15 @@ Inspired by [OpenClaw](https://openclaw.ai/) — the self-hosted personal AI mov
 ## Schedule
 
 | Activity | Date |
-|----------|------|
-| Teaser | March 19, 2026 |
-| Official Announcement & Start | March 25, 2026 |
-| Live Workshop (David & Denis) | March 26, 2026 — 19:00 CET · [Register](https://luma.com/pepmqy4k) |
-| Eliza x Nosana Live Session | March 31 / April 1, 2026 · [Register](https://luma.com/5z3zbsfz) |
-| Builders Challenge Singapore Workshop | April 2, 2026 · [Register](https://luma.com/nosanachallenge) |
-| Germany Buidl Station (Live Workshop) | April 2–3, 2026 · [Register](https://luma.com/berlinbootcamp) |
-| **Challenge Ends** | **April 14, 2026** |
-| Winner Announcement | April 23, 2026 |
+|---|---|
+| Teaser | March 19 (or earlier) |
+| Official Announcement And Start | March 25, 12:00 UTC |
+| Ams Workshop | March 25, 18:00, Amsterdam |
+| Live Workshop w/ David & Denis (superteam co-marketing) | March 26 – 19:00 CET |
+| Builders Challenge Singapore Workshop | Thursday, April 2, 6:00–9:00 PM GMT+8 |
+| Eliza Workshop (tbd) | Thursday, April 2, 6:00–7:00 PM GMT+2 |
+| **End of Builders Challenge** | **14 April** |
+| **Winner Announcement** | **23 April** |
 
 ---
 
