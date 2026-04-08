@@ -1,0 +1,48 @@
+{
+  "ops": [
+    {
+      "id": "qwen2.5:32b",
+      "args": {
+        "cmd": [
+          "-c",
+          "ollama serve & sleep 5 && ollama pull $MODEL && tail -f /dev/null"
+        ],
+        "env": {
+          "MODEL": "qwen2.5:32b"
+        },
+        "gpu": true,
+        "image": "docker.io/ollama/ollama:0.6.6",
+        "expose": [
+          {
+            "port": 11434,
+            "health_checks": [
+              {
+                "body": "{\"model\":\"qwen2.5:32b\",\"messages\":[{\"role\":\"user\",\"content\":\"Respond with a single word: Ready\"}],\"stream\":false}",
+                "path": "/v1/chat/completions",
+                "type": "http",
+                "method": "POST",
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "continuous": true,
+                "expected_status": 200
+              }
+            ]
+          }
+        ],
+        "entrypoint": [
+          "/bin/sh"
+        ]
+      },
+      "type": "container/run"
+    }
+  ],
+  "meta": {
+    "trigger": "dashboard",
+    "system_requirements": {
+      "required_vram": 4
+    }
+  },
+  "type": "container",
+  "version": "0.1"
+}
