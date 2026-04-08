@@ -17,6 +17,13 @@ For this challenge we will be using Mastra to build our tool.
 
 > Mastra is an opinionated TypeScript framework that helps you build AI applications and features quickly. It gives you the set of primitives you need: workflows, agents, RAG, integrations, and evals. You can run Mastra on your local machine, or deploy to a serverless cloud.
 
+### Required Reading
+
+We recommend reading the following sections to get started with how to create an Agent and how to implement Tool Calling.
+
+- <https://mastra.ai/en/docs/agents/overview>
+- <https://mastra.ai/en/docs/tools-mcp/overview>
+
 ## Get Started
 
 To get started run the following command to start developing:
@@ -37,13 +44,27 @@ Nosana will be providing an LLM-Endpoint, you are welcome to use your own, this 
 
 Welcome to the Nosana AI Agent Hackathon! Your mission is to build and deploy an AI agent on Nosana. While we provide a weather agent as an example, your creativity is the limit. Build agents that:
 
-- Deploy and manage applications on Nosana
-- Monitor blockchain activities
-- Automate trading strategies
-- Create content generation tools
-- Build data analysis assistants
-- Develop customer service bots
-- Or any other innovative AI agent idea!
+**Beginner Level:**
+
+- **Joke Teller**: An agent that tells jokes based on topics
+- **Random Fact Generator**: Share interesting facts about various subjects
+- **Simple Calculator**: Perform basic math operations with explanations
+- **Todo List Manager**: Help users track their daily tasks
+
+**Intermediate Level:**
+
+- **News Summarizer**: Fetch and summarize latest news articles
+- **Crypto Price Checker**: Monitor cryptocurrency prices and changes
+- **GitHub Stats Reporter**: Fetch repository statistics and insights
+
+**Advanced Level:**
+
+- **Blockchain Monitor**: Track and alert on blockchain activities
+- **Trading Strategy Bot**: Automate simple trading strategies
+- **Deploy Manager**: Deploy and manage applications on Nosana
+- **Data Analysis Assistant**: Analyze CSV/JSON data and generate insights
+
+Or any other innovative AI agent idea at your skill level!
 
 ### Getting Started
 
@@ -131,15 +152,28 @@ Submissions will be evaluated based on:
 
 ### Example Ideas
 
-Need inspiration? Here are some agent ideas:
+Need inspiration? Here are some agent ideas by difficulty:
 
-- **DeFi Monitor**: Track and alert on blockchain events
-- **Code Review Assistant**: Analyze PRs and suggest improvements
-- **Research Summarizer**: Aggregate and summarize papers/articles
-- **NFT Price Tracker**: Monitor collections and alert on opportunities
-- **DevOps Assistant**: Automate deployment and monitoring tasks
-- **Content Creator**: Generate social media posts or blog articles
-- **Data Pipeline Manager**: Orchestrate data processing workflows
+**Easy Start:**
+
+- **Dad Joke Bot**: Use a joke API to deliver puns on demand
+- **Number Facts**: Share interesting facts about numbers
+- **Dice Roller**: Roll virtual dice for games with custom sides
+- **Color Generator**: Generate random color palettes with hex codes
+
+**Medium Challenge:**
+
+- **Weather Comparer**: Compare weather between multiple cities
+- **Recipe Finder**: Search recipes based on ingredients
+- **Movie Recommender**: Suggest movies based on preferences
+- **Markdown Converter**: Convert text to various markdown formats
+
+**Advanced Projects:**
+
+- **Smart Contract Monitor**: Watch for specific blockchain events
+- **AI Code Reviewer**: Analyze code quality and suggest improvements
+- **Research Assistant**: Summarize academic papers and articles
+- **Portfolio Tracker**: Monitor crypto/stock portfolios with alerts
 
 ### Resources
 
@@ -152,7 +186,6 @@ Need inspiration? Here are some agent ideas:
 ### Support
 
 - Join [Nosana Discord](https://discord.gg/nosana) for technical support
-- Check the [Nosana Forum](https://forum.nosana.io) for discussions
 - Follow [@nosana_ai](https://x.com/nosana_ai) for updates
 
 ### Important Notes
