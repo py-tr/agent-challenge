@@ -1,6 +1,6 @@
 import { Agent } from "@mastra/core/agent";
-import { yourTool } from "../your-agent/your-tool";
 import { model } from "../../config";
+import { yourTool } from "../your-agent/your-tool";
 
 // Define Agent Name
 const name = "Your Agent";
