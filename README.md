@@ -34,7 +34,7 @@ Inspired by [OpenClaw](https://openclaw.ai/) — the self-hosted personal AI mov
 
 | Activity | Date | CTA |
 |---|---|---|
-| Teaser | March 19 (or earlier) | Luma Link |
+| Teaser | March 19 (or earlier) | — |
 | Official Announcement And Start | March 25, 12:00 UTC | [superteam.fun/earn/listing/nosana-builders-elizaos-challenge/](https://superteam.fun/earn/listing/nosana-builders-elizaos-challenge/) |
 | Ams Workshop | March 25, 18:00, Amsterdam | [luma.com/amsterdam-mar25](https://luma.com/amsterdam-mar25) |
 | Live Workshop w/ David & Denis (superteam co-marketing) | March 26 – 19:00 CET | [luma.com/pepmqy4k](https://luma.com/pepmqy4k) |
