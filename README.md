@@ -34,10 +34,6 @@ pnpm install
 pnpm run dev
 ```
 
-### LLM-Endpoint
-
-Nosana will be providing an LLM-Endpoint, you are welcome to use your own, this can be changed in `.env`
-
 ## Assignment
 
 ### Challenge Overview
@@ -96,6 +92,78 @@ Rename these files to represent the purpose of your agent and tools. You can use
 
 As a bonus, for the ambitious ones, we have also provided the [src/mastra/agents/weather-agent/weather-workflow.ts](./src/mastra/agents/weather-agent/weather-workflow.ts) file as an example. This file contains an example of how you can chain agents and tools to create a workflow, in this case, the user provides their location, and the agent retrieves the weather for the specified location, and suggests an itinerary.
 
+### LLM-Endpoint
+
+Agents depend on an LLM to be able to do their work. Nosana will be providing an LLM-Endpoint, but you are welcome to use your own, which can be changed in `.env`.
+
+#### Using Nosana Endpoint
+
+The default configuration uses a Nosana provided endpoint. Simply ensure your `.env` file contains the correct configuration commented out.
+
+#### Running Your Own LLM with Ollama
+
+For local development or if you prefer to use your own LLM, you can use [Ollama](https://ollama.ai) to serve the lightweight `qwen2.5:1.5b` mode.
+
+**Installation & Setup:**
+
+1. **[ Install Ollama ](https://ollama.com/download)**:
+
+2. **Start Ollama service**:
+
+```bash
+ollama serve
+```
+
+3. **Pull and run the `qwen2.5:1.5b` model**:
+
+```bash
+ollama pull qwen2.5:1.5b
+ollama run qwen2.5:1.5b
+```
+
+4. **Update your `.env` file**
+
+There are two predefined environments defined in the `.env` file. One for local development and another, with a larger model, `qwen2.5:32b`, for more complex use cases.
+
+**Why `qwen2.5:1.5b`?**
+
+- Lightweight (only ~1GB)
+- Fast inference on CPU
+- Supports tool calling
+- Great for development and testing
+
+Do note `qwen2.5:1.5b` is not suited for complex tasks.
+
+The Ollama server will run on `http://localhost:11434` by default and is compatible with the OpenAI API format that Mastra expects.
+
+### Testing your Agent
+
+You can read the [Mastra Documentation: Playground](https://mastra.ai/en/docs/local-dev/mastra-dev) to learn more on how to test your agent locally.
+Before deploying your agent to Nosana, it's crucial to thoroughly test it locally to ensure everything works as expected. Follow these steps to validate your agent:
+
+**Local Testing:**
+
+1. **Start the development server** with `pnpm run dev` and navigate to `http://localhost:8080` in your browser
+2. **Test your agent's conversation flow** by interacting with it through the chat interface
+3. **Verify tool functionality** by triggering scenarios that call your custom tools
+4. **Check error handling** by providing invalid inputs or testing edge cases
+5. **Monitor the console logs** to ensure there are no runtime errors or warnings
+
+**Docker Testing:**
+After building your Docker container, test it locally before pushing to the registry:
+
+```bash
+# Build your container
+docker build -t yourusername/agent-challenge:latest .
+
+# Run it locally with environment variables
+docker run -p 8080:8080 --env-file .env yourusername/agent-challenge:latest
+
+# Test the containerized agent at http://localhost:8080
+```
+
+Ensure your agent responds correctly and all tools function properly within the containerized environment. This step is critical as the Nosana deployment will use this exact container.
+
 ### Submission Requirements
 
 #### 1. Code Development
@@ -141,7 +209,7 @@ docker push yourusername/agent-challenge:latest
 
 We have included a Nosana job definition at <./nos_job_def/nosana_mastra.json>, that you can use to publish your agent to the Nosana network.
 
-**Deploying using [@nosana/cli](https://github.com/nosana-ci/nosana-cli/)**
+**A. Deploying using [@nosana/cli](https://github.com/nosana-ci/nosana-cli/)**
 
 - Edit the file and add in your published docker image to the `image` property. `"image": "docker.io/yourusername/agent-challenge:latest"`
 - Download and install the [@nosana/cli](https://github.com/nosana-ci/nosana-cli/)
@@ -151,7 +219,7 @@ We have included a Nosana job definition at <./nos_job_def/nosana_mastra.json>, 
 - Run: `nosana job post --file nosana_mastra.json --market nvidia-3060 --timeout 30`
 - Go to the [Nosana Dashboard](https://dashboard.nosana.com/deploy) to see your job
 
-**Deploying using the [Nosana Dashboard](https://dashboard.nosana.com/deploy)**
+**B. Deploying using the [Nosana Dashboard](https://dashboard.nosana.com/deploy)**
 
 - Make sure you have https://phantom.com/, installed for your browser.
 - Go to our [Discord](https://nosana.com/discord) and ask for some NOS and SOL to publish your job.
