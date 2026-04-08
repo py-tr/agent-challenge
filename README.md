@@ -238,6 +238,25 @@ nosana job post \
 
 ---
 
+## What You'll Build
+
+Your submission should include:
+- **A working AI agent** built with ElizaOS
+- **A frontend interface** to interact with your agent (web UI, chat interface, dashboard, etc.)
+- **Deployment on Nosana** — your agent must run on Nosana's decentralized infrastructure
+
+**The deeper your Nosana integration, the better your score.** We're looking for projects that fully embrace decentralized infrastructure — not just a minimal deployment, but thoughtful integration into your architecture.
+
+### Examples of Deep Integration (Better Scores):
+- Using Nosana for both training and inference
+- Multi-node deployments across Nosana's network
+- Custom deployment pipelines using Nosana CLI
+- Monitoring and observability integrated with Nosana infrastructure
+- Storage solutions that leverage decentralized networks
+- Creative use of Nosana's compute marketplace
+
+---
+
 ## Submission
 
 Submit your project via the official submission page: **[superteam.fun/earn/listing/nosana-builders-elizaos-challenge/](https://superteam.fun/earn/listing/nosana-builders-elizaos-challenge/)** before **April 14, 2026**.
@@ -245,7 +264,8 @@ Submit your project via the official submission page: **[superteam.fun/earn/list
 **Submission Checklist** — All items are required:
 
 - [ ] **Fork this repository** and build your agent on the `elizaos-challenge` branch
-- [ ] **Deploy to Nosana** and get your public deployment URL
+- [ ] **Build a frontend/UI** for interacting with your agent
+- [ ] **Deploy to Nosana** and get your public deployment URL (agent must run on Nosana infrastructure)
 - [ ] **Star the following repositories:**
   - [ ] [nosana-ci/agent-challenge](https://github.com/nosana-ci/agent-challenge)
   - [ ] [nosana-ci/nosana-programs](https://github.com/nosana-ci/nosana-programs)
@@ -255,7 +275,7 @@ Submit your project via the official submission page: **[superteam.fun/earn/list
 - [ ] **Provide your GitHub fork link** (public repository)
 - [ ] **Provide your Nosana deployment URL** (running agent)
 - [ ] **Write a description** of your agent and what it does (≤300 words)
-- [ ] **Record a video demo** (<1 minute) showing the agent in action
+- [ ] **Record a video demo** (<1 minute) showing your agent and frontend in action
 
 > **⚠️ Important:** Submissions that do not meet these requirements will not be considered.
 
@@ -267,10 +287,18 @@ Submit your project via the official submission page: **[superteam.fun/earn/list
 
 | Criterion | Weight |
 |-----------|--------|
-| Technical implementation (ElizaOS + Nosana integration) | 30% |
-| Usefulness / real-world applicability | 30% |
-| Creativity and originality | 20% |
-| Code quality and documentation | 20% |
+| Technical implementation | 25% |
+| Nosana integration depth | 25% |
+| Usefulness & UX | 25% |
+| Creativity & originality | 15% |
+| Documentation | 10% |
+
+**Judging Details:**
+- **Technical implementation (25%)** — Code quality, architecture, and ElizaOS best practices
+- **Nosana integration depth (25%)** — How deeply Nosana is integrated into your deployment and infrastructure
+- **Usefulness & UX (25%)** — Real-world applicability, frontend quality, and user experience
+- **Creativity & originality (15%)** — Innovative use cases and novel approaches
+- **Documentation (10%)** — Code quality, README, setup instructions
 
 **Judges:** DevRel Lead & Ecosystem Specialist, Nosana
 
