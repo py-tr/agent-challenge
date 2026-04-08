@@ -22,7 +22,7 @@ For this challenge we will be using Mastra to build our tool.
 We recommend reading the following sections to get started with how to create an Agent and how to implement Tool Calling.
 
 - <https://mastra.ai/en/docs/agents/overview>
-- <https://mastra.ai/en/docs/tools-mcp/overview>
+- [Mastra Guide: Build an AI stock agent](https://mastra.ai/en/guides/guide/stock-agent)
 
 ## Get Started
 
@@ -73,6 +73,37 @@ Or any other innovative AI agent idea at your skill level!
 3. **Install dependencies** with `pnpm install`
 4. **Run the development server** with `pnpm run dev`
 5. **Build your agent** using the Mastra framework
+
+### How to build your Agent
+
+Here we will describe the steps needed to build an agent.
+
+#### Example: Weather Agent
+
+Provided in this repo, there is the `Weather Agent`.
+This is a fully working agent that allows a user to chat with an LLM, and fetches real time weather data for the provided location.
+
+There are two main folders we need to pay attention to:
+
+- [src/mastra/agents](./src/mastra/agents)
+- [src/mastra/tools](./src/mastra/tools)
+
+In `agents/` we define our agent using `new Agent({...})`, here define where we are serving our LLM, the instructions it should follow, and which tools (functions) it can call.
+
+in `tools/` we define the functions needed to create the tool that the agents can call. We need to define the structure of the input and output data, where to fetch resources, and our business logic.
+
+---
+
+As a bonus, for the ambitious ones we have also provided the [src/mastra/workflows/](src/mastra/workflows/) folder as an example. This folder contains an example of how you can chain agents and tools to create a workflow, in this case, the user provides their location, and the agent retrieves the weather for the specified location, and suggests an itinerary.
+
+#### Your Agent
+
+We have provided two files for you to start your work:
+
+- [src/mastra/agents/your-agent.ts](src/mastra/agents/your-agents.ts)
+- [src/mastra/tools/your-tool.ts](src/mastra/tools/your-tool.ts)
+
+Rename these files to represent the purpose of your agent and tools. You can use the [Weather Agent Example](#example:_weather_agent) as a guide until you are done with it, and then you can delete these files before submitting your final submission.
 
 ### Submission Requirements
 
@@ -125,7 +156,7 @@ Or any other innovative AI agent idea at your skill level!
 3. **Social Media Post**: Share your submission on X (Twitter)
    - Tag @nosana_ai
    - Include a brief description of your agent
-   - Add hashtag #NosanaAgentHackathon
+   - Add hashtag #NosanaAgentChallenge
 
 ### Judging Criteria
 
@@ -150,35 +181,11 @@ Submissions will be evaluated based on:
    - Potential for adoption
    - Value proposition
 
-### Example Ideas
-
-Need inspiration? Here are some agent ideas by difficulty:
-
-**Easy Start:**
-
-- **Dad Joke Bot**: Use a joke API to deliver puns on demand
-- **Number Facts**: Share interesting facts about numbers
-- **Dice Roller**: Roll virtual dice for games with custom sides
-- **Color Generator**: Generate random color palettes with hex codes
-
-**Medium Challenge:**
-
-- **Weather Comparer**: Compare weather between multiple cities
-- **Recipe Finder**: Search recipes based on ingredients
-- **Movie Recommender**: Suggest movies based on preferences
-- **Markdown Converter**: Convert text to various markdown formats
-
-**Advanced Projects:**
-
-- **Smart Contract Monitor**: Watch for specific blockchain events
-- **AI Code Reviewer**: Analyze code quality and suggest improvements
-- **Research Assistant**: Summarize academic papers and articles
-- **Portfolio Tracker**: Monitor crypto/stock portfolios with alerts
-
 ### Resources
 
 - [Nosana Documentation](https://docs.nosana.io)
 - [Mastra Documentation](https://mastra.ai/docs)
+- [Mastra Guide: Build an AI stock agent](https://mastra.ai/en/guides/guide/stock-agent)
 - [Nosana CLI](https://github.com/nosana-ci/nosana-cli)
 - [Docker Documentation](https://docs.docker.com)
 - [Example Weather Agent](src/mastra/agents/weather-agent.ts)
