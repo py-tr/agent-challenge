@@ -2,7 +2,8 @@
 
 FROM node:23-slim AS base
 
-# Install system dependencies needed for native modules (e.g. better-sqlite3)
+# ── System dependencies ────────────────────────────────────────────────────────
+# python3/make/g++ for native modules (better-sqlite3 etc.)
 RUN apt-get update && apt-get install -y \
   python3 \
   make \
@@ -16,23 +17,34 @@ RUN apt-get update && apt-get install -y \
 RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:$PATH"
 
+# Install pnpm
+RUN npm install -g pnpm
+
 # Disable telemetry
 ENV ELIZAOS_TELEMETRY_DISABLED=true
 ENV DO_NOT_TRACK=1
 
 WORKDIR /app
 
-# Install pnpm
-RUN npm install -g pnpm
+# ── Install root dependencies (includes devDeps for tsc) ──────────────────────
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
-# Copy package manifest and install dependencies
-COPY package.json ./
-RUN pnpm install
+# ── Install & build frontend ──────────────────────────────────────────────────
+# Copy frontend source and its own lockfile so Vite + tsc are available.
+COPY frontend/package.json frontend/pnpm-lock.yaml ./frontend/
+RUN cd frontend && pnpm install --frozen-lockfile
 
-# Copy all source files
+COPY frontend/ ./frontend/
+RUN cd frontend && pnpm run build
+# dist/frontend/ now exists at /app/dist/frontend/
+
+# ── Compile TypeScript ────────────────────────────────────────────────────────
 COPY . .
+RUN pnpm compile
+# dist/pulse/... now exists at /app/dist/
 
-# Create data directory for SQLite
+# ── Runtime configuration ─────────────────────────────────────────────────────
 RUN mkdir -p /app/data
 
 EXPOSE 3000
