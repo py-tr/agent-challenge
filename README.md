@@ -121,11 +121,41 @@ Rename these files to represent the purpose of your agent and tools. You can use
 - Container must be publicly accessible
 - Include the container URL in your submission
 
+##### Build, Run, Publish
+
+Note: You'll need an account on [Dockerhub](https://hub.docker.com/)
+
+```sh
+
+# Build and tag
+docker build -t yourusername/agent-challenge:latest .
+
+# Run the container locally
+docker run -p 8080:8080 yourusername/agent-challenge:latest
+
+# Login
+docker login
+
+# Push
+docker push yourusername/agent-challenge:latest
+```
+
 #### 3. Nosana Deployment
 
 - Deploy your Docker container on Nosana
 - Your agent must successfully run on the Nosana network
 - Include the Nosana job ID or deployment link
+
+##### Nosana Job Definition
+
+We have included a nosana job definition at <nosana_mastra.json>, that you can use to publish your agent to the Nosana network.
+
+- Edit the file and add in your published docker image to the `image` property. `"image": "docker.io/yourusername/agent-challenge:latest"`
+- Download and install the [@nosana/cli](https://github.com/nosana-ci/nosana-cli/)
+- Load your wallet with some funds
+  - Retrieve your address with: `nosana address`
+  - Go to our [Discord](https://nosana.com/discord) and ask for some NOS and SOL to publish your job.
+  - Run: `nosana job post --file nosana_mastra.json --market nvidia-3060 --timeout 30`
 
 #### 4. Video Demo
 
@@ -163,15 +193,18 @@ Rename these files to represent the purpose of your agent and tools. You can use
 Submissions will be evaluated based on:
 
 1. **Innovation** (25%)
+
    - Originality of the agent concept
    - Creative use of AI capabilities
 
 2. **Technical Implementation** (25%)
+
    - Code quality and organization
    - Proper use of the Mastra framework
    - Efficient tool implementation
 
 3. **Nosana Integration** (25%)
+
    - Successful deployment on Nosana
    - Resource efficiency
    - Stability and performance
