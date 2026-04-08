@@ -43,8 +43,6 @@ While we provide a weather agent as an example, your creativity is the limit. Bu
 
 **Beginner Level:**
 
-- **Joke Teller**: An agent that tells jokes based on topics
-- **Random Fact Generator**: Share interesting facts about various subjects
 - **Simple Calculator**: Perform basic math operations with explanations
 - **Todo List Manager**: Help users track their daily tasks
 
@@ -59,7 +57,6 @@ While we provide a weather agent as an example, your creativity is the limit. Bu
 - **Blockchain Monitor**: Track and alert on blockchain activities
 - **Trading Strategy Bot**: Automate simple trading strategies
 - **Deploy Manager**: Deploy and manage applications on Nosana
-- **Data Analysis Assistant**: Analyze CSV/JSON data and generate insights
 
 Or any other innovative AI agent idea at your skill level!
 
@@ -255,7 +252,7 @@ We have included a Nosana job definition at <./nos_job_def/nosana_mastra.json>, 
    - Tag @nosana_ai
    - Include a brief description of your agent
    - Add hashtag #NosanaAgentChallenge
-4. **Finalize your submission on the <https://earn.superteam.com/agent-challenge> page**
+4. **Finalize your submission on the <https://earn.superteam.fun/agent-challenge> page**
 
 - Remember to add your forked GitHub repository link
 - Remember to add a link to your X post.
@@ -296,7 +293,7 @@ We’re awarding the **top 10 submissions**:
 - 🏅 4th: $200 USDC
 - 🔟 5th–10th: $100 USDC
 
-All prizes are paid out directly to participants on [SuperTeam](https://superteam.com)
+All prizes are paid out directly to participants on [SuperTeam](https://superteam.fun)
 
 ### Resources
 
