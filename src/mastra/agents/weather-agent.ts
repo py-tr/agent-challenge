@@ -17,18 +17,11 @@ const instructions = `
 
       Use the weatherTool to fetch current weather data.
 `
-// const memory = new Memory({
-//   storage: new LibSQLStore({
-//     url: 'file:../mastra.db', // path is relative to the .mastra/output directory
-//   }),
-// }),
-
 
 export const weatherAgent = new Agent({
   name,
   instructions,
   model,
-  // memory,
   tools: { weatherTool },
 });
 
