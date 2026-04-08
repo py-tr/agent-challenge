@@ -22,6 +22,8 @@
     "@mastra/libsql": "^0.10.2",
     "@mastra/loggers": "^0.10.2",
     "@mastra/memory": "^0.10.3",
+    "dotenv": "^16.5.0",
+    "ollama-ai-provider": "^1.2.0",
     "zod": "^3.25.67"
   },
   "devDependencies": {
