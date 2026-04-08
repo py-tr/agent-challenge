@@ -93,6 +93,15 @@ As a bonus, for the ambitious ones, we have also provided the [src/mastra/agents
 
 Agents depend on an LLM to be able to do their work.
 
+#### Nosana Endpoint
+
+You can use the following endpoint and model for testing, if you wish:
+
+```
+MODEL_NAME_AT_ENDPOINT=qwen2.5:1.5b
+API_BASE_URL= https://dashboard.nosana.com/jobs/GPVMUckqjKR6FwqnxDeDRqbn34BH7gAa5xWnWuNH1drf
+```
+
 #### Running Your Own LLM with Ollama
 
 The default configuration uses a local [Ollama](https://ollama.com) LLM.
