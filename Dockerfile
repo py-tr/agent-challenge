@@ -3,7 +3,7 @@
 FROM node:23-slim AS base
 
 # ── System dependencies ────────────────────────────────────────────────────────
-# python3/make/g++ for native modules (better-sqlite3 etc.)
+# python3/make/g++ for native modules (e.g. better-sqlite3)
 RUN apt-get update && apt-get install -y \
   python3 \
   make \
@@ -26,25 +26,26 @@ ENV DO_NOT_TRACK=1
 
 WORKDIR /app
 
-# ── Install root dependencies (includes devDeps for tsc) ──────────────────────
+# ── Dependency install (cached by lockfile) ───────────────────────────────────
+# Copy only manifests first so this layer is invalidated only when deps change.
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
-# ── Install & build frontend ──────────────────────────────────────────────────
-# Copy frontend source and its own lockfile so Vite + tsc are available.
 COPY frontend/package.json frontend/pnpm-lock.yaml ./frontend/
 RUN cd frontend && pnpm install --frozen-lockfile
 
-COPY frontend/ ./frontend/
-RUN cd frontend && pnpm run build
-# dist/frontend/ now exists at /app/dist/frontend/
-
-# ── Compile TypeScript ────────────────────────────────────────────────────────
+# ── Source ────────────────────────────────────────────────────────────────────
 COPY . .
-RUN pnpm compile
-# dist/pulse/... now exists at /app/dist/
 
-# ── Runtime configuration ─────────────────────────────────────────────────────
+# ── Build ─────────────────────────────────────────────────────────────────────
+# 1. Compile TypeScript → dist/  (dist/pulse/…, dist/index.js, etc.)
+RUN pnpm compile
+
+# 2. Build React frontend → dist/frontend/  (must come AFTER pnpm compile so
+#    dist/ already exists; Vite's emptyOutDir:true only wipes dist/frontend/).
+RUN cd frontend && pnpm run build
+
+# ── Runtime ───────────────────────────────────────────────────────────────────
 RUN mkdir -p /app/data
 
 EXPOSE 3000
