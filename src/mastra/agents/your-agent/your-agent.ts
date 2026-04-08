@@ -1,9 +1,9 @@
-import { Agent } from '@mastra/core/agent';
-import { yourTool } from '../your-agent/your-tool';
-import { model } from '../../config';
+import { Agent } from "@mastra/core/agent";
+import { yourTool } from "../your-agent/your-tool";
+import { model } from "../../config";
 
 // Define Agent Name
-const name = "Your Agent"
+const name = "Your Agent";
 
 // Define instructions for the agent
 // TODO: Add link here for recommendations on how to properly define instructions for an agent.
@@ -19,14 +19,11 @@ const instructions = `
 
       // Define function that the agent needs to call
       Use the yourTool to fetch current weather data.
-`
+`;
 
 export const yourAgent = new Agent({
-  name,
-  instructions,
-  model,
-  tools: { yourTool },
+	name,
+	instructions,
+	model,
+	tools: { yourTool },
 });
-
-
-

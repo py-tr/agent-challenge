@@ -1,10 +1,10 @@
 // This serves as an example, can be deleted later.
 
-import { Agent } from '@mastra/core/agent';
-import { weatherTool } from '../weather-agent/weather-tool';
-import { model } from '../../config';
+import { Agent } from "@mastra/core/agent";
+import { weatherTool } from "../weather-agent/weather-tool";
+import { model } from "../../config";
 
-const name = "Weather Agent"
+const name = "Weather Agent";
 const instructions = `
       You are a helpful weather assistant that provides accurate weather information.
 
@@ -16,14 +16,11 @@ const instructions = `
       - Keep responses concise but informative
 
       Use the weatherTool to fetch current weather data.
-`
+`;
 
 export const weatherAgent = new Agent({
-  name,
-  instructions,
-  model,
-  tools: { weatherTool },
+	name,
+	instructions,
+	model,
+	tools: { weatherTool },
 });
-
-
-
