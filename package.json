@@ -1,7 +1,7 @@
 {
   "name": "agent-challenge",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": ".mastra/output/index.mjs",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "deploy:agent": "nosana job post --file ./nos_job_def/nosana_mastra.json --market nvidia-3090 --timeout 30",
