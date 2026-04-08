@@ -32,16 +32,16 @@ Inspired by [OpenClaw](https://openclaw.ai/) — the self-hosted personal AI mov
 
 ## Schedule
 
-| Activity | Date |
-|---|---|
-| Teaser | March 19 (or earlier) |
-| Official Announcement And Start | March 25, 12:00 UTC |
-| Ams Workshop | March 25, 18:00, Amsterdam |
-| Live Workshop w/ David & Denis (superteam co-marketing) | March 26 – 19:00 CET |
-| Builders Challenge Singapore Workshop | Thursday, April 2, 6:00–9:00 PM GMT+8 |
-| Eliza Workshop (tbd) | Thursday, April 2, 6:00–7:00 PM GMT+2 |
-| **End of Builders Challenge** | **14 April** |
-| **Winner Announcement** | **23 April** |
+| Activity | Date | CTA |
+|---|---|---|
+| Teaser | March 19 (or earlier) | Luma Link |
+| Official Announcement And Start | March 25, 12:00 UTC | [superteam.fun/earn/listing/nosana-builders-elizaos-challenge/](https://superteam.fun/earn/listing/nosana-builders-elizaos-challenge/) |
+| Ams Workshop | March 25, 18:00, Amsterdam | [luma.com/amsterdam-mar25](https://luma.com/amsterdam-mar25) |
+| Live Workshop w/ David & Denis (superteam co-marketing) | March 26 – 19:00 CET | [luma.com/pepmqy4k](https://luma.com/pepmqy4k) |
+| Builders Challenge Singapore Workshop | Thursday, April 2, 6:00–9:00 PM GMT+8 | [luma.com/nosanachallenge](https://luma.com/nosanachallenge) |
+| Eliza Workshop (tbd) | Thursday, April 2, 6:00–7:00 PM GMT+2 | [luma.com/5z3zbsfz](https://luma.com/5z3zbsfz) |
+| **End of Builders Challenge** | **14 April** | — |
+| **Winner Announcement** | **23 April** | — |
 
 ---
 
