@@ -46,9 +46,16 @@ import { CalendarMcpService } from "../services/CalendarMcpService.js";
 
 // Resolve relative to the compiled file (dist/pulse/routes/pulseRoutes.js),
 // not process.cwd() which varies depending on how ElizaOS launches the agent.
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = dirname(__filename);
 /** Resolved path to the built React SPA (dist/frontend/ from project root). */
 const FRONTEND_DIR = resolve(__dirname, "../../../dist/frontend");
+
+// Debug: log resolved paths on module load so they appear in startup logs.
+console.log("[Pulse:Routes] __filename:", __filename);
+console.log("[Pulse:Routes] __dirname:", __dirname);
+console.log("[Pulse:Routes] FRONTEND_DIR:", FRONTEND_DIR);
+console.log("[Pulse:Routes] cwd:", process.cwd());
 
 /** Content-Type mapping for files emitted by Vite. */
 const MIME: Record<string, string> = {
