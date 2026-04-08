@@ -72,7 +72,7 @@ const PENDING_ITEMS = [
     title:     "Slib Guard: proposal for Mark due tomorrow",
     body:
       "In your email to Mark (3 days ago) you wrote:\n\n" +
-      "  "I'll send over the updated pricing proposal by end of week."\n\n" +
+      "  \"I'll send over the updated pricing proposal by end of week.\"\n\n" +
       "Tomorrow is Friday and no follow-up has been sent. " +
       "Pulse drafted a follow-up below — approve to send.\n\n" +
       "---\n" +
@@ -144,7 +144,7 @@ const PENDING_ITEMS = [
     title:     "Slib Guard: send budget forecast to Finance by Apr 18",
     body:
       "Detected in your email to Anna (Finance):\n\n" +
-      "  "I'll have the Q2 budget forecast ready by April 18."\n\n" +
+      "  \"I'll have the Q2 budget forecast ready by April 18.\"\n\n" +
       "Deadline is in 10 days. No action required yet, but this reminder " +
       "is here so it doesn't slip through the cracks.",
     metadata:  JSON.stringify({
