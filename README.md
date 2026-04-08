@@ -240,15 +240,24 @@ nosana job post \
 
 ## Submission
 
-1. Fork this repo and build your agent on the `elizaos-challenge` branch
-2. Deploy it to Nosana and get your public URL
-3. Submit via the official submission page: **[superteam.fun/earn/listing/nosana-builders-elizaos-challenge/](https://superteam.fun/earn/listing/nosana-builders-elizaos-challenge/)** before **April 14, 2026**
+Submit your project via the official submission page: **[superteam.fun/earn/listing/nosana-builders-elizaos-challenge/](https://superteam.fun/earn/listing/nosana-builders-elizaos-challenge/)** before **April 14, 2026**.
 
-Your submission must include:
-- Link to your **public GitHub fork**
-- Your **Nosana deployment URL** (running agent)
-- A short **description** of your agent and what it does (≤300 words)
-- A **video demo** (≤3 minutes) showing the agent in action
+**Submission Checklist** — All items are required:
+
+- [ ] **Fork this repository** and build your agent on the `elizaos-challenge` branch
+- [ ] **Deploy to Nosana** and get your public deployment URL
+- [ ] **Star the following repositories:**
+  - [ ] [nosana-ci/agent-challenge](https://github.com/nosana-ci/agent-challenge)
+  - [ ] [nosana-ci/nosana-programs](https://github.com/nosana-ci/nosana-programs)
+  - [ ] [nosana-ci/nosana-kit](https://github.com/nosana-ci/nosana-kit)
+  - [ ] [nosana-ci/nosana-cli](https://github.com/nosana-ci/nosana-cli)
+- [ ] **Make a social media post** about your project on your platform of choice (X/Twitter, LinkedIn, Bluesky, Instagram, or other)
+- [ ] **Provide your GitHub fork link** (public repository)
+- [ ] **Provide your Nosana deployment URL** (running agent)
+- [ ] **Write a description** of your agent and what it does (≤300 words)
+- [ ] **Record a video demo** (<1 minute) showing the agent in action
+
+> **⚠️ Important:** Submissions that do not meet these requirements will not be considered.
 
 > For complete submission requirements and additional information, visit the [official challenge page](https://superteam.fun/earn/listing/nosana-builders-elizaos-challenge/).
 
