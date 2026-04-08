@@ -1,3 +1,4 @@
+// This files serves as an example, can be deleted later.
 import { Agent } from '@mastra/core/agent';
 import { createStep, createWorkflow } from '@mastra/core/workflows';
 import { z } from 'zod';

@@ -23,8 +23,7 @@ const instructions = `
       Use the yourTool to fetch current weather data.
 `
 
-
-export const weatherAgent = new Agent({
+export const yourAgent = new Agent({
   name,
   instructions,
   model,

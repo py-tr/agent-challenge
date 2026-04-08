@@ -1,8 +1,10 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 
+// Simple async function that conforms to input and output schema
+const getInfo = async (ctx: string) => Promise.resolve({ bar: 42, baz: "baz" });
 
-// Define your tool using the `createTool` method
+// Define your tool using the `createktool`
 export const yourTool = createTool({
   id: 'tool-name',
   description: 'Use the `createTool function to create your tool',
@@ -14,7 +16,7 @@ export const yourTool = createTool({
     baz: z.string(),
   }),
   execute: async ({ context }) => {
-    return await (context.foo) => "do stuff"
+    return await getInfo(context.foo)
   },
 });
 

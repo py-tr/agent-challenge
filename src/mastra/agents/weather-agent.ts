@@ -1,3 +1,5 @@
+// This serves as an example, can be deleted later.
+
 import { Agent } from '@mastra/core/agent';
 import { Memory } from '@mastra/memory';
 import { LibSQLStore } from '@mastra/libsql';
