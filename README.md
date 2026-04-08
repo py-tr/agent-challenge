@@ -193,42 +193,152 @@ SQLite is configured by default — sufficient for development and small-scale a
 
 ## Deploy to Nosana
 
-### Step 1: Build and push your Docker image
+> **Important:** For this challenge, you must deploy your agent to Nosana's decentralized infrastructure. Do **not** use the standard `elizaos deploy` command — that deploys to centralized cloud providers. This challenge is about embracing decentralized compute.
+
+**Why Nosana?**
+- **Decentralized** — Your agent runs on a distributed network of GPU providers, not AWS/GCP/Azure
+- **Cost-effective** — Use your free builders credits (no credit card required)
+- **Permissionless** — No vendor lock-in, full control over your infrastructure
+- **Challenge requirement** — All submissions must be deployed on Nosana
+
+### Prerequisites
+
+Before deploying, ensure you have:
+- [Docker](https://docs.docker.com/get-docker/) installed and running
+- A [Docker Hub](https://hub.docker.com/) account (free)
+- Your [Nosana builders credits](https://nosana.com/builders-credits) claimed
+
+### Step 1: Build and Push Your Docker Image
+
+Your agent needs to be containerized and available on a public registry (Docker Hub) so Nosana nodes can pull and run it.
 
 ```bash
-# Build
+# Build your Docker image
 docker build -t yourusername/nosana-eliza-agent:latest .
 
-# Test locally
+# Test it locally first (recommended)
 docker run -p 3000:3000 --env-file .env yourusername/nosana-eliza-agent:latest
 
-# Push to Docker Hub
+# Visit http://localhost:3000 to verify it works
+
+# Log in to Docker Hub
 docker login
+
+# Push to Docker Hub (make it public)
 docker push yourusername/nosana-eliza-agent:latest
 ```
 
-### Step 2: Update the job definition
+> **Tip:** Replace `yourusername` with your actual Docker Hub username. Make sure your repository is **public** so Nosana nodes can pull it.
 
-Edit `nos_job_def/nosana_eliza_job_definition.json` and replace `yourusername/nosana-eliza-agent:latest` with your image.
+### Step 2: Configure Your Job Definition
 
-### Step 3: Deploy via Nosana Dashboard
+Edit `nos_job_def/nosana_eliza_job_definition.json` and update the Docker image reference:
 
-1. Open [Nosana Dashboard](https://dashboard.nosana.com/deploy)
-2. Click `Expand` to open the job definition editor
-3. Paste the contents of `nos_job_def/nosana_eliza_job_definition.json`
-4. Select your preferred compute market
-5. Click `Deploy`
+```json
+{
+  "version": "0.1",
+  "type": "container",
+  "meta": {
+    "trigger": "cli"
+  },
+  "ops": [
+    {
+      "type": "container/run",
+      "id": "eliza-agent",
+      "args": {
+        "image": "yourusername/nosana-eliza-agent:latest",  // <- Change this
+        "ports": ["3000:3000"],
+        "env": {
+          "OPENAI_API_KEY": "nosana",
+          "OPENAI_API_URL": "https://3gsrmj6gchzyws9bnc835apd4fh6t5tyeppmbxmzrzhn.node.k8s.prd.nos.ci/v1",
+          "MODEL_NAME": "Qwen3.5-27B-AWQ-4bit"
+        }
+      }
+    }
+  ]
+}
+```
 
-### Step 4: Deploy via Nosana CLI
+> **Security Note:** For production deployments, avoid hardcoding sensitive environment variables. Consider using Nosana secrets management or external secret stores.
+
+### Step 3: Deploy via Nosana Dashboard (Easiest)
+
+This is the recommended method for beginners:
+
+1. Visit the [Nosana Dashboard](https://dashboard.nosana.com/deploy)
+2. Connect your Solana wallet (you need this for authentication and using credits)
+3. Click **Expand** to open the job definition editor
+4. Copy and paste the contents of your `nos_job_def/nosana_eliza_job_definition.json` file
+5. Select your preferred compute market:
+   - `nvidia-3090` — High performance (recommended for production)
+   - `nvidia-rtx-4090` — Premium performance
+   - `cpu-only` — Budget option (slower inference)
+6. Click **Deploy**
+7. Wait for a node to pick up your job (usually 30-60 seconds)
+8. Once running, you'll receive a public URL to access your agent
+
+### Step 4: Deploy via Nosana CLI (Advanced)
+
+For developers who prefer the command line or want to automate deployments:
+
+1. First get your API key at [https://deploy.nosana.com/account/](https://deploy.nosana.com/account/)
+2. Edit the [Nosana ElizaOS Job Definition File](./nos_job_def/nosana_eliza_job_definition.json)
+3. Learn more about [Nosana Job Definition Here](https://learn.nosana.com/deployments/jobs/job-definition/intro.html)
 
 ```bash
+# Install the Nosana CLI globally
 npm install -g @nosana/cli
 
+
+# Deploy your agent
 nosana job post \
   --file ./nos_job_def/nosana_eliza_job_definition.json \
-  --market nvidia-3090 \
-  --timeout 30
+  --market nvidia-4090 \
+  --timeout 300 \
+  --api <API_KEY>
+
+# Monitor your deployment
+nosana job status <job-id>
+
+# View logs
+nosana job logs <job-id>
 ```
+
+**CLI Flags Explained:**
+- `--file` — Path to your job definition JSON
+- `--market` — Which GPU market to use (nvidia-3090, nvidia-rtx-4090, etc.)
+- `--timeout` — Maximum job runtime in minutes
+
+### Step 5: Verify Your Deployment
+
+Once your job is running on Nosana:
+
+1. **Test the endpoint** — Visit the public URL provided by Nosana
+2. **Check agent responsiveness** — Send a test message to your agent
+3. **Monitor logs** — Use the Nosana Dashboard or CLI to view logs
+4. **Verify inference** — Ensure the Qwen3.5-27B model is responding correctly
+
+### Troubleshooting
+
+**Agent not starting?**
+- Check that your Docker image is public on Docker Hub
+- Verify your job definition JSON is valid
+- Ensure environment variables are correctly set
+- Check Nosana dashboard logs for error messages
+
+**Slow response times?**
+- Consider using a higher-tier GPU market (nvidia-rtx-4090)
+- Optimize your ElizaOS configuration
+- Check if the Nosana inference endpoint is reachable
+
+**Out of credits?**
+- Visit [nosana.com/builders-credits](https://nosana.com/builders-credits) to check your balance
+- Credits are airdropped twice daily — be patient if you just signed up
+
+**Need help?**
+- Join the [Nosana Discord](https://nosana.com/discord) for support
+- Check the [Nosana documentation](https://docs.nosana.io)
+- Review the [Nosana CLI docs](https://github.com/nosana-ci/nosana-cli)
 
 ---
 
