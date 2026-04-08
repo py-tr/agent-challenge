@@ -32,6 +32,8 @@ Inspired by [OpenClaw](https://openclaw.ai/) — the self-hosted personal AI mov
 
 ## Schedule
 
+Follow Nosana's Luma for more information: [Nosana Luma](https://luma.com/calendar/cal-RF19mq3EtF4juLc)
+
 ![](./assets/image.png)
 
 ---
