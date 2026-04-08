@@ -1,307 +1,295 @@
-# Builders' Challenge #3: AI Agents 102
-**Presented by Nosana and Mastra**
+# Nosana x ElizaOS Agent Challenge
 
-![Agent](./assets/NosanaBuildersChallenge03.jpg)
+Build your own **personal AI agent** using [ElizaOS](https://elizaos.com) and deploy it on the [Nosana](https://nosana.com) decentralized compute network. Win a share of **$3,000 USDC** in prizes.
 
-## Welcome to the AI Agent Challenge
+---
 
-Build and deploy intelligent AI agents using the **Mastra framework** on the **Nosana decentralized compute network**. Whether you're a beginner or an experienced developer, this challenge has something for everyone!
+## The Challenge
 
-## 🎯 Challenge Overview
+Inspired by [OpenClaw](https://openclaw.ai/) — the self-hosted personal AI movement — this challenge is about giving AI back to the individual. Build an agent that runs on **your own infrastructure**, handles **your own tasks**, and keeps **your own data**.
 
-**Your Mission:** Build an intelligent AI agent with a frontend interface and deploy it on Nosana's decentralized network.
+> **Theme: Personal AI Agents** — Build an AI agent that acts as a personal assistant, automate your life, or solve a real problem for yourself or your community. The use case is entirely up to you.
 
-### What You'll Build
+**Framework:** [ElizaOS](https://elizaos.com) (latest v2)
+**Compute:** [Nosana](https://nosana.com) decentralized GPU network
+**Model:** Qwen3.5-27B (hosted endpoint provided by Nosana)
 
-Create an AI agent that performs real-world tasks using:
-- **Mastra framework** for agent orchestration
-- **Tool calling** to interact with external services
-- **MCP (Model Context Protocol)** for enhanced capabilities
-- **Custom frontend** to showcase your agent's functionality
+---
 
-### Agent Ideas & Examples
+## Prizes — $3,000 USDC Total
 
-The possibilities are endless! Here are some ideas to get you started:
+| Place | Prize |
+|-------|-------|
+| 🥇 1st | $1,000 USDC |
+| 🥈 2nd | $750 USDC |
+| 🥉 3rd | $450 USDC |
+| 4th | $200 USDC |
+| 5th–10th | $100 USDC each |
 
-- 🤖 **Personal Assistant** - Schedule management, email drafting, task automation
-- 📊 **Data Analyst Agent** - Fetch financial data, generate insights, create visualizations
-- 🌐 **Web Researcher** - Aggregate information from multiple sources, summarize findings
-- 🛠️ **DevOps Helper** - Monitor services, automate deployments, manage infrastructure
-- 🎨 **Content Creator** - Generate social media posts, blog outlines, marketing copy
-- 🔍 **Smart Search** - Multi-source search with AI-powered result synthesis
-- 💬 **Customer Support Bot** - Answer FAQs, ticket routing, knowledge base queries
+---
 
-**Be Creative!** The best agents solve real problems in innovative ways.
+## Schedule
 
-## Getting Started Template
+| Activity | Date |
+|----------|------|
+| Teaser | March 19, 2026 |
+| Official Announcement & Start | March 25, 2026 |
+| Live Workshop (David & Denis) | March 26, 2026 — 19:00 CET · [Register](https://luma.com/pepmqy4k) |
+| Eliza x Nosana Live Session | March 31 / April 1, 2026 · [Register](https://luma.com/5z3zbsfz) |
+| Builders Challenge Singapore Workshop | April 2, 2026 · [Register](https://luma.com/nosanachallenge) |
+| Germany Buidl Station (Live Workshop) | April 2–3, 2026 · [Register](https://luma.com/berlinbootcamp) |
+| **Challenge Ends** | **April 14, 2026** |
+| Winner Announcement | April 23, 2026 |
 
-This is a starter template for building AI agents using [Mastra](https://mastra.ai) and [CopilotKit](https://copilotkit.ai). It provides a modern Next.js application with integrated AI capabilities and a beautiful UI.
+---
+
+## What to Build
+
+There are no strict requirements on use case — build whatever is most useful to you. Some ideas to get started:
+
+- 🗂️ **Personal assistant** — calendar, tasks, email drafting, reminders
+- 🔍 **Research agent** — web search, summarization, knowledge synthesis
+- 📱 **Social media manager** — Twitter/X, Telegram, Discord automation
+- 💰 **DeFi/crypto agent** — portfolio monitoring, on-chain alerts, trading insights
+- 🏠 **Home automation** — smart home control, IoT integration
+- 🛠️ **DevOps helper** — monitor services, automate deployments
+- 🎨 **Content creator** — blog posts, social copy, creative writing
+
+**Tip:** ElizaOS has a rich [plugin ecosystem](https://elizaos.github.io/eliza/docs/core/plugins). Explore existing plugins and templates before building from scratch — you might find 80% of what you need already exists.
+
+---
 
 ## Getting Started
 
-### Prerequisites & Registration
+### Prerequisites
 
-To participate in the challenge and get Nosana credits/NOS tokens, complete these steps:
+- Node.js 23+
+- pnpm (`npm install -g pnpm`)
+- Docker (for deployment)
+- Git
 
-1. Register at [SuperTeam](https://earn.superteam.fun/listing/nosana-builders-challenge-agents-102)
-2. Register at the [Luma Page](https://luma.com/zkob1iae)
-3. Star these repos:
-   - [this repo](https://github.com/nosana-ci/agent-challenge)
-   - [Nosana CLI](https://github.com/nosana-ci/nosana-cli)
-   - [Nosana SDK](https://github.com/nosana-ci/nosana-sdk)
-4. Complete [this registration form](https://e86f0b9c.sibforms.com/serve/MUIFALaEjtsXB60SDmm1_DHdt9TOSRCFHOZUSvwK0ANbZDeJH-sBZry2_0YTNi1OjPt_ZNiwr4gGC1DPTji2zdKGJos1QEyVGBzTq_oLalKkeHx3tq2tQtzghyIhYoF4_sFmej1YL1WtnFQyH0y1epowKmDFpDz_EdGKH2cYKTleuTu97viowkIIMqoDgMqTD0uBaZNGwjjsM07T)
-
-### Setup Your Development Environment
-
-#### **Step 1: Fork, Clone and Quickstart**
+### Quick Start
 
 ```bash
-# Fork this repo on GitHub, then clone your fork
+# Fork this repo, then clone your fork
 git clone https://github.com/YOUR-USERNAME/agent-challenge
-
 cd agent-challenge
+git checkout elizaos-challenge
 
+# Copy and configure environment variables
 cp .env.example .env
+# Edit .env with your Nosana endpoint details
 
-pnpm i
+# Install dependencies
+pnpm install
 
-pnpm run dev:ui      # Start UI server (port 3000)
-pnpm run dev:agent   # Start Mastra agent server (port 4111)
+# Start your agent in development mode
+pnpm dev
 ```
 
-Open <http://localhost:3000> to see your agent in action in the frontend.
-Open <http://localhost:4111> to open up the Mastra Agent Playground.
+Open [http://localhost:3000](http://localhost:3000) to see the ElizaOS built-in client.
 
-#### **Step 2: Choose Your LLM for Development (Optional)**
+---
 
-Pick one option below to power your agent during development:
+## Configure Your LLM
 
-##### Option A: Use Shared Nosana LLM Endpoint (Recommended - No Setup!)
-
-We provide a free LLM endpoint hosted on Nosana for development. Edit your `.env`:
+Nosana provides a hosted **Qwen3.5-27B** endpoint for challenge participants. Update your `.env`:
 
 ```env
-# Qwen3:8b - Nosana Endpoint
-# Note baseURL for Ollama needs to be appended with `/api`
-OLLAMA_API_URL=https://3yt39qx97wc9hqwwmylrphi4jsxrngjzxnjakkybnxbw.node.k8s.prd.nos.ci/api
-MODEL_NAME_AT_ENDPOINT=qwen3:8b
+OPENAI_API_KEY=nosana
+OPENAI_API_URL=https://<nosana-endpoint>.node.k8s.prd.nos.ci/v1
+MODEL_NAME=qwen3.5-27b
 ```
 
-If it goes down, reach out on [Discord](https://discord.com/channels/236263424676331521/1354391113028337664)
+> The Nosana endpoint URL will be shared in the [Nosana Discord](https://nosana.com/discord) when the challenge starts.
 
-##### Option B: Use Local LLM
-
-Run Ollama locally (requires [Ollama installed](https://ollama.com/download)):
+### Option B: Local Development with Ollama
 
 ```bash
-ollama pull qwen3:0.6b
+ollama pull qwen3.5:27b
 ollama serve
 ```
 
-Edit your `.env`:
 ```env
-OLLAMA_API_URL=http://127.0.0.1:11434/api
-MODEL_NAME_AT_ENDPOINT=qwen3:0.6b
+OPENAI_API_KEY=ollama
+OPENAI_API_URL=http://127.0.0.1:11434/v1
+MODEL_NAME=qwen3.5:27b
 ```
 
-##### Option C: Use OpenAI
+---
 
-Add to your `.env` and uncomment the OpenAI line in `src/mastra/agents/index.ts`:
+## Customize Your Agent
 
-```env
-OPENAI_API_KEY=your-key-here
+### 1. Define your agent's character
+
+Edit `characters/agent.character.json` to define your agent's personality, knowledge, and behavior:
+
+```json
+{
+  "name": "MyAgent",
+  "bio": ["Your agent's backstory and capabilities"],
+  "system": "Your agent's core instructions and behavior",
+  "plugins": ["@elizaos/plugin-bootstrap", "@elizaos/plugin-openai"],
+  "clients": ["direct"]
+}
 ```
 
-## 🏗️ Implementation Timeline
+### 2. Add plugins
 
-**Important Dates:**
-- Start Challenge: 10 October
-- Submission Deadline: 31 October
-- Winners Announced: 07 November
+Extend your agent by adding plugins to `package.json` and your character file:
 
-### Phase 1: Development
+| Plugin | Use Case |
+|--------|----------|
+| `@elizaos/plugin-bootstrap` | Required base plugin |
+| `@elizaos/plugin-openai` | OpenAI-compatible LLM (required for Nosana endpoint) |
+| `@elizaos/plugin-web-search` | Web search capability |
+| `@elizaos/plugin-telegram` | Telegram bot client |
+| `@elizaos/plugin-discord` | Discord bot client |
+| `@elizaos/plugin-twitter` | Twitter/X integration |
+| `@elizaos/plugin-browser` | Browser/web automation |
+| `@elizaos/plugin-sql` | Database access |
 
-1. **Setup** : Fork repo, install dependencies, choose template
-2. **Build** : Implement your tool functions and agent logic
-3. **Test** : Validate functionality at http://localhost:3000
+Install a plugin:
+```bash
+pnpm add @elizaos/plugin-web-search
+```
 
-### Phase 2: Containerization
+Add it to your character file:
+```json
+{
+  "plugins": ["@elizaos/plugin-bootstrap", "@elizaos/plugin-openai", "@elizaos/plugin-web-search"]
+}
+```
 
-1. **Clean up**: Remove unused agents from `src/mastra/index.ts`
-2. **Build**: Create Docker container using the provided `Dockerfile`
-3. **Test locally**: Verify container works correctly
+### 3. Build custom actions (optional)
+
+Add your own custom logic in `src/index.ts`. See the example plugin already included.
+
+### 4. Persistent storage
+
+SQLite is configured by default — sufficient for development and small-scale agents. For a production-grade personal agent, consider:
+
+- A mounted volume on Nosana
+- External database (PostgreSQL, PlanetScale, etc.)
+- Decentralized storage (Arweave, IPFS)
+
+---
+
+## Deploy to Nosana
+
+### Step 1: Build and push your Docker image
 
 ```bash
-# Build your container (using the provided Dockerfile)
-docker build -t yourusername/agent-challenge:latest .
+# Build
+docker build -t yourusername/nosana-eliza-agent:latest .
 
-# Test locally first
-docker run -p 3000:3000 yourusername/agent-challenge:latest 
+# Test locally
+docker run -p 3000:3000 --env-file .env yourusername/nosana-eliza-agent:latest
 
 # Push to Docker Hub
 docker login
-docker push yourusername/agent-challenge:latest
+docker push yourusername/nosana-eliza-agent:latest
 ```
 
-### Phase 3: Deployment to Nosana
-1. **Deploy your complete stack**: The provided `Dockerfile` will deploy:
-   - Your Mastra agent
-   - Your frontend interface
-   - An LLM to power your agent (all in one container!)
-2. **Verify**: Test your deployed agent on Nosana network
-3. **Capture proof**: Screenshot or get deployment URL for submission
+### Step 2: Update the job definition
 
-### Phase 4: Video Demo
+Edit `nos_job_def/nosana_eliza_job_definition.json` and replace `yourusername/nosana-eliza-agent:latest` with your image.
 
-Record a 1-3 minute video demonstrating:
-- Your agent **running on Nosana** (show the deployed version!)
-- Key features and functionality
-- The frontend interface in action
-- Real-world use case demonstration
-- Upload to YouTube, Loom, or similar platform
+### Step 3: Deploy via Nosana Dashboard
 
-### Phase 5: Documentation
-
-Update this README with:
-- Agent description and purpose
-- What tools/APIs your agent uses
-- Setup instructions
-- Environment variables required
-- Example usage and screenshots
-
-## ✅ Minimum Requirements
-
-Your submission **must** include:
-
-- [ ] **Agent with Tool Calling** - At least one custom tool/function
-- [ ] **Frontend Interface** - Working UI to interact with your agent
-- [ ] **Deployed on Nosana** - Complete stack running on Nosana network
-- [ ] **Docker Container** - Published to Docker Hub
-- [ ] **Video Demo** - 1-3 minute demonstration
-- [ ] **Updated README** - Clear documentation in your forked repo
-- [ ] **Social Media Post** - Share on X/BlueSky/LinkedIn with #NosanaAgentChallenge
-
-## Submission Process
-
-1. **Complete all requirements** listed above
-2. **Commit all of your changes to the `main` branch of your forked repository**
-   - All your code changes
-   - Updated README
-   - Link to your Docker container
-   - Link to your video demo
-   - Nosana deployment proof
-3. **Social Media Post** (Required): Share your submission on X (Twitter), BlueSky, or LinkedIn
-   - Tag @nosana_ai
-   - Include a brief description of your agent
-   - Add hashtag #NosanaAgentChallenge
-4. **Finalize your submission on the [SuperTeam page](https://earn.superteam.fun/listing/nosana-builders-challenge-agents-102)**
-   - Add your forked GitHub repository link
-   - Add a link to your social media post
-   - Submissions that do not meet all requirements will not be considered
-
-## 🚀 Deploying to Nosana
-
-
-### Using Nosana Dashboard
 1. Open [Nosana Dashboard](https://dashboard.nosana.com/deploy)
 2. Click `Expand` to open the job definition editor
-3. Edit `nos_job_def/nosana_mastra.json` with your Docker image:
-   ```json
-   {
-     "image": "yourusername/agent-challenge:latest"
-   }
-   ```
-4. Copy and paste the edited job definition
-5. Select a GPU
-6. Click `Deploy`
+3. Paste the contents of `nos_job_def/nosana_eliza_job_definition.json`
+4. Select your preferred compute market
+5. Click `Deploy`
 
-### Using Nosana CLI (Alternative)
+### Step 4: Deploy via Nosana CLI
+
 ```bash
 npm install -g @nosana/cli
-nosana job post --file ./nos_job_def/nosana_mastra.json --market nvidia-3090 --timeout 30
+
+nosana job post \
+  --file ./nos_job_def/nosana_eliza_job_definition.json \
+  --market nvidia-3090 \
+  --timeout 30
 ```
 
-## 🏆 Judging Criteria
+---
 
-Submissions evaluated on 4 key areas (25% each):
+## Submission
 
-### 1. Innovation 🎨
-- Originality of agent concept
-- Creative use of AI capabilities
-- Unique problem-solving approach
+1. Fork this repo and build your agent on the `elizaos-challenge` branch
+2. Deploy it to Nosana and get your public URL
+3. Submit via the official submission form (TODO: add link) before **April 14, 2026**
 
-### 2. Technical Implementation 💻
-- Code quality and organization
-- Proper use of Mastra framework
-- Efficient tool implementation
-- Error handling and robustness
+Your submission must include:
+- Link to your **public GitHub fork**
+- Your **Nosana deployment URL** (running agent)
+- A short **description** of your agent and what it does (≤300 words)
+- A **video demo** (≤3 minutes) showing the agent in action
 
-### 3. Nosana Integration ⚡
-- Successful deployment on Nosana
-- Resource efficiency
-- Stability and performance
-- Proper containerization
+---
 
-### 4. Real-World Impact 🌍
-- Practical use cases
-- Potential for adoption
-- Clear value proposition
-- Demonstration quality
+## Judging Criteria
 
-## 🎁 Prizes
+| Criterion | Weight |
+|-----------|--------|
+| Technical implementation (ElizaOS + Nosana integration) | 30% |
+| Usefulness / real-world applicability | 30% |
+| Creativity and originality | 20% |
+| Code quality and documentation | 20% |
 
-**Top 10 submissions will be rewarded:**
-- 🥇 1st Place: $1,000 USDC
-- 🥈 2nd Place: $750 USDC
-- 🥉 3rd Place: $450 USDC
-- 🏅 4th Place: $200 USDC
-- 🏅 5th-10th Place: $100 USDC each
+**Judges:** DevRel Lead & Ecosystem Specialist, Nosana
 
-## 📚 Learning Resources
+---
 
-For more information, check out the following resources:
+## Project Structure
 
-- [Nosana Documentation](https://docs.nosana.io)
-- [Mastra Documentation](https://mastra.ai/en/docs) - Learn more about Mastra and its features
-- [CopilotKit Documentation](https://docs.copilotkit.ai) - Explore CopilotKit's capabilities
-- [Next.js Documentation](https://nextjs.org/docs) - Learn about Next.js features and API
-- [Docker Documentation](https://docs.docker.com)
-- [Nosana CLI](https://github.com/nosana-ci/nosana-cli)
-- [Mastra Agents Overview](https://mastra.ai/en/docs/agents/overview)
-- [Build an AI Stock Agent Guide](https://mastra.ai/en/guides/guide/stock-agent)
-- [Mastra Tool Calling Documentation](https://mastra.ai/en/docs/agents/tools)
+```
+├── characters/
+│   └── agent.character.json   # Your agent's character definition
+├── src/
+│   └── index.ts               # Custom plugin entry point (optional)
+├── nos_job_def/
+│   └── nosana_eliza_job_definition.json  # Nosana deployment config
+├── Dockerfile                 # Container configuration
+├── .env.example               # Environment variable template
+└── package.json
+```
 
-## 🆘 Support & Community
+---
 
-### Get Help
-- **Discord**: Join [Nosana Discord](https://nosana.com/discord) 
-- **Dedicated Channel**: [Builders Challenge Dev Chat](https://discord.com/channels/236263424676331521/1354391113028337664)
-- **Twitter**: Follow [@nosana_ai](https://x.com/nosana_ai) for live updates
+## Resources
 
-## 🎉 Ready to Build?
+### ElizaOS
+- [ElizaOS Documentation](https://elizaos.github.io/eliza/docs) — Full framework docs
+- [ElizaOS Plugin Directory](https://elizaos.github.io/eliza/docs/core/plugins) — Browse available plugins
+- [ElizaOS GitHub](https://github.com/elizaos/eliza) — Source code and examples
+- [ElizaOS Discord](https://discord.gg/elizaos) — Community support
 
-1. **Fork** this repository
-2. **Build** your AI agent
-3. **Deploy** to Nosana
-4. **Present** your creation
+### Nosana
+- [Nosana Documentation](https://docs.nosana.io) — Platform guide
+- [Nosana Dashboard](https://dashboard.nosana.com) — Deploy and manage jobs
+- [Nosana CLI](https://github.com/nosana-ci/nosana-cli) — Command-line deployment
+- [Nosana Discord](https://nosana.com/discord) — Support and endpoint URL
 
-Good luck, builders! We can't wait to see the innovative AI agents you create for the Nosana ecosystem.
+### Qwen3.5
+- [Qwen3.5-27B on HuggingFace](https://huggingface.co/Qwen/Qwen3.5-27B)
 
-**Happy Building!** 🚀
+---
 
-## Stay in the Loop
+## Support & Community
 
-Want access to exclusive builder perks, early challenges, and Nosana credits?
-Subscribe to our newsletter and never miss an update.
+- **Discord** — Join [Nosana Discord](https://nosana.com/discord) for support, the Nosana endpoint URL, and to connect with other builders
+- **Twitter/X** — Follow [@nosana_ai](https://x.com/nosana_ai) and [@elizaos](https://x.com/elizaos) for updates
+- **GitHub** — Open an issue in this repo if you find problems with the template
 
-👉 [ Join the Nosana Builders Newsletter ](https://e86f0b9c.sibforms.com/serve/MUIFALaEjtsXB60SDmm1_DHdt9TOSRCFHOZUSvwK0ANbZDeJH-sBZry2_0YTNi1OjPt_ZNiwr4gGC1DPTji2zdKGJos1QEyVGBzTq_oLalKkeHx3tq2tQtzghyIhYoF4_sFmej1YL1WtnFQyH0y1epowKmDFpDz_EdGKH2cYKTleuTu97viowkIIMqoDgMqTD0uBaZNGwjjsM07T)
+---
 
-Be the first to know about:
-- 🧠 Upcoming Builders Challenges
-- 💸 New reward opportunities
-- ⚙ Product updates and feature drops
-- 🎁 Early-bird credits and partner perks
+## License
 
-Join the Nosana builder community today — and build the future of decentralized AI.
+This template is open source and available under the [MIT License](./LICENSE).
 
+---
 
+**Built with ElizaOS · Deployed on Nosana · Powered by Qwen3.5**
