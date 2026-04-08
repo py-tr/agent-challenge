@@ -92,17 +92,38 @@ Open [http://localhost:3000](http://localhost:3000) to see the ElizaOS built-in 
 
 ---
 
+## Claim Your Nosana Builders Credits
+
+All challenge participants get **free compute credits** to deploy and run their agents on Nosana.
+
+**How to claim:**
+
+1. Visit [nosana.com/builders-credits](https://nosana.com/builders-credits)
+2. Sign up or log in with your wallet
+3. Your credits will be added to your account automatically
+4. Use these credits to deploy your ElizaOS agent to the Nosana network
+
+These credits cover the compute costs for running your agent during the challenge period.
+
+> **Note:** Credits are airdropped twice a day. Please be patient if you don't see them immediately after signing up.
+
+---
+
 ## Configure Your LLM
 
-Nosana provides a hosted **Qwen3.5-27B** endpoint for challenge participants. Update your `.env`:
+Nosana provides a hosted **Qwen3.5-27B-AWQ-4bit** endpoint for challenge participants. Update your `.env`:
 
 ```env
 OPENAI_API_KEY=nosana
-OPENAI_API_URL=https://<nosana-endpoint>.node.k8s.prd.nos.ci/v1
-MODEL_NAME=qwen3.5-27b
+OPENAI_API_URL=https://3gsrmj6gchzyws9bnc835apd4fh6t5tyeppmbxmzrzhn.node.k8s.prd.nos.ci/v1
+MODEL_NAME=Qwen3.5-27B-AWQ-4bit
 ```
 
-> The Nosana endpoint URL will be shared in the [Nosana Discord](https://nosana.com/discord) when the challenge starts.
+**Model Details:**
+- **Model ID:** `Qwen3.5-27B-AWQ-4bit`
+- **Max Context Length:** 60,000 tokens
+- **Provider:** Nosana decentralized inference
+- **Base Model:** cyankiwi/Qwen3.5-27B-AWQ-4bit
 
 ### Option B: Local Development with Ollama
 
@@ -221,13 +242,15 @@ nosana job post \
 
 1. Fork this repo and build your agent on the `elizaos-challenge` branch
 2. Deploy it to Nosana and get your public URL
-3. Submit via the official submission form (TODO: add link) before **April 14, 2026**
+3. Submit via the official submission page: **[superteam.fun/earn/listing/nosana-builders-elizaos-challenge/](https://superteam.fun/earn/listing/nosana-builders-elizaos-challenge/)** before **April 14, 2026**
 
 Your submission must include:
 - Link to your **public GitHub fork**
 - Your **Nosana deployment URL** (running agent)
 - A short **description** of your agent and what it does (≤300 words)
 - A **video demo** (≤3 minutes) showing the agent in action
+
+> For complete submission requirements and additional information, visit the [official challenge page](https://superteam.fun/earn/listing/nosana-builders-elizaos-challenge/).
 
 ---
 
