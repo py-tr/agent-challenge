@@ -1,10 +1,8 @@
 // This serves as an example, can be deleted later.
 
 import { Agent } from '@mastra/core/agent';
-import { Memory } from '@mastra/memory';
-import { LibSQLStore } from '@mastra/libsql';
-import { weatherTool } from '../tools/weather-tool';
-import { model } from '../config';
+import { weatherTool } from '../weather-agent/weather-tool';
+import { model } from '../../config';
 
 const name = "Weather Agent"
 const instructions = `

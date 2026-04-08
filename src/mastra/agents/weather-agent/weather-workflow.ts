@@ -2,7 +2,7 @@
 import { Agent } from '@mastra/core/agent';
 import { createStep, createWorkflow } from '@mastra/core/workflows';
 import { z } from 'zod';
-import { model } from '../config';
+import { model } from '../../config';
 
 const agent = new Agent({
   name: 'Weather Agent',

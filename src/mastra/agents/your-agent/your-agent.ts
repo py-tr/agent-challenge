@@ -1,14 +1,12 @@
 import { Agent } from '@mastra/core/agent';
-import { Memory } from '@mastra/memory';
-import { LibSQLStore } from '@mastra/libsql';
-import { yourTool } from '../tools/your-tool';
-import { model } from '../config';
+import { yourTool } from '../your-agent/your-tool';
+import { model } from '../../config';
 
 // Define Agent Name
 const name = "Your Agent"
 
 // Define instructions for the agent
-// TODO: Add link here for recomendations on how to properly define instructions for an agent.
+// TODO: Add link here for recommendations on how to properly define instructions for an agent.
 // TODO: Remove comments (// ...) from `instructions`
 const instructions = `
       // Define the character of the agent.
