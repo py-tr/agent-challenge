@@ -1,4 +1,4 @@
-FROM nikolaik/python-nodejs:latest
+FROM ollama/ollama:0.7.0
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y \
 RUN npm install -g pnpm
 
 # Install Ollama
-RUN curl -fsSL https://ollama.com/install.sh | sh
+# RUN curl -fsSL https://ollama.com/install.sh | sh
 
 # Create app directory
 WORKDIR /app
