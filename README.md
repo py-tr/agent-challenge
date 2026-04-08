@@ -94,14 +94,11 @@ As a bonus, for the ambitious ones, we have also provided the [src/mastra/agents
 
 ### LLM-Endpoint
 
-Agents depend on an LLM to be able to do their work. Nosana will be providing an LLM-Endpoint, but you are welcome to use your own, which can be changed in `.env`.
-
-#### Using Nosana Endpoint
-
-The default configuration uses a Nosana provided endpoint. Simply ensure your `.env` file contains the correct configuration commented out.
+Agents depend on an LLM to be able to do their work.
 
 #### Running Your Own LLM with Ollama
 
+The default configuration uses a local [Ollama](https://ollama.com) LLM.
 For local development or if you prefer to use your own LLM, you can use [Ollama](https://ollama.ai) to serve the lightweight `qwen2.5:1.5b` mode.
 
 **Installation & Setup:**
