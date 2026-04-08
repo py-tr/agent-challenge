@@ -23,7 +23,7 @@
  *   GET  localhost:3000/api/agents/{agentId}/plugins/pulse/queue
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve, extname, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MemoryType, type Route, type RouteRequest, type RouteResponse, type IAgentRuntime } from "@elizaos/core";
@@ -51,11 +51,17 @@ const __dirname  = dirname(__filename);
 /** Resolved path to the built React SPA (dist/frontend/ from project root). */
 const FRONTEND_DIR = resolve(__dirname, "../../../dist/frontend");
 
-// Debug: log resolved paths on module load so they appear in startup logs.
+// Debug: log resolved paths and actual filesystem state on module load.
 console.log("[Pulse:Routes] __filename:", __filename);
 console.log("[Pulse:Routes] __dirname:", __dirname);
 console.log("[Pulse:Routes] FRONTEND_DIR:", FRONTEND_DIR);
 console.log("[Pulse:Routes] cwd:", process.cwd());
+try {
+  console.log("[Pulse:Routes] /app/dist contents:", readdirSync("/app/dist"));
+} catch (e) {
+  console.log("[Pulse:Routes] /app/dist contents: ERROR -", (e as Error).message);
+}
+console.log("[Pulse:Routes] /app/dist/frontend exists:", existsSync("/app/dist/frontend"));
 
 /** Content-Type mapping for files emitted by Vite. */
 const MIME: Record<string, string> = {
