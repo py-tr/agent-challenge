@@ -3,6 +3,9 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  // In production the frontend is served at /pulse/dashboard/ by the ElizaOS backend.
+  // base must match that mount point so Vite emits absolute asset URLs.
+  base: "/pulse/dashboard/",
   server: {
     port: 5173,
     proxy: {

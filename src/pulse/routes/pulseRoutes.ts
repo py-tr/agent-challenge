@@ -11,6 +11,8 @@
  *   Define paths WITHOUT the plugin-name prefix or they double-up.
  *
  * Actual URLs after registration:
+ *   GET  localhost:3000/pulse/dashboard          ← React SPA entry point
+ *   GET  localhost:3000/pulse/dashboard/assets/* ← Vite-built static assets
  *   GET  localhost:3000/pulse/queue
  *   POST localhost:3000/pulse/approve/:id
  *   POST localhost:3000/pulse/reject/:id
@@ -21,7 +23,10 @@
  *   GET  localhost:3000/api/agents/{agentId}/plugins/pulse/queue
  */
 
+import { existsSync, readFileSync } from "node:fs";
+import { resolve, extname, join } from "node:path";
 import type { Route, RouteRequest, RouteResponse, IAgentRuntime } from "@elizaos/core";
+import { getMetrics } from "../lib/nosanaMetrics.js";
 import {
   getQueue,
   getActionItem,
@@ -35,6 +40,49 @@ import {
 import type { Db } from "../db/schema.js";
 import { GmailMcpService } from "../services/GmailMcpService.js";
 import { CalendarMcpService } from "../services/CalendarMcpService.js";
+
+// ─── Frontend static-file serving ────────────────────────────────────────────
+
+/** Resolved path to the built React SPA (dist/frontend/ from project root). */
+const FRONTEND_DIR = resolve(process.cwd(), "dist/frontend");
+
+/** Content-Type mapping for files emitted by Vite. */
+const MIME: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js":   "application/javascript; charset=utf-8",
+  ".css":  "text/css; charset=utf-8",
+  ".svg":  "image/svg+xml",
+  ".ico":  "image/x-icon",
+  ".png":  "image/png",
+  ".json": "application/json",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf":  "font/ttf",
+  ".eot":  "application/vnd.ms-fontobject",
+};
+
+/**
+ * Reads a file from the built frontend directory and writes it to the response.
+ * Uses `res.setHeader` (available on Express Response) for Content-Type and
+ * Cache-Control; falls back gracefully if the underlying object lacks it.
+ */
+function serveFrontendFile(filePath: string, res: RouteResponse, cached = false): void {
+  if (!existsSync(filePath)) {
+    err(res, "Not found", 404);
+    return;
+  }
+
+  const ext = extname(filePath).toLowerCase();
+  const mime = MIME[ext] ?? "application/octet-stream";
+  // Hashed asset files are immutable; index.html must revalidate on each load.
+  const cacheControl = cached
+    ? "public, max-age=31536000, immutable"
+    : "no-cache, no-store, must-revalidate";
+
+  res.setHeader?.("Content-Type", mime);
+  res.setHeader?.("Cache-Control", cacheControl);
+  res.status(200).send(readFileSync(filePath));
+}
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
@@ -50,6 +98,50 @@ function err(res: RouteResponse, message: string, status = 500): void {
 // Paths here are SUFFIXES only — ElizaOS prepends "/pulse/" automatically.
 
 export const pulseRoutes: Route[] = [
+  // ── GET /pulse/dashboard ─────────────────────────────────────────────────
+  // Entry point for the React SPA.  The frontend is built with
+  //   base: '/pulse/dashboard/'
+  // so all asset <script>/<link> tags emit absolute URLs under that prefix.
+  {
+    type: "GET",
+    path: "/dashboard",
+    public: true,
+    name: "Pulse Dashboard",
+    handler: async (_req: RouteRequest, res: RouteResponse, _runtime: IAgentRuntime) => {
+      const indexPath = join(FRONTEND_DIR, "index.html");
+      if (!existsSync(indexPath)) {
+        // Frontend has not been built yet — return a helpful error instead of a blank 404.
+        res.status(503).send(
+          "<!doctype html><html><body><h1>Dashboard not built</h1>" +
+          "<p>Run <code>cd frontend &amp;&amp; pnpm build</code> then restart the agent.</p>" +
+          "</body></html>"
+        );
+        return;
+      }
+      serveFrontendFile(indexPath, res, false);
+    },
+  },
+
+  // ── GET /pulse/dashboard/assets/:file ────────────────────────────────────
+  // Vite emits all JS, CSS, and other assets into dist/frontend/assets/ with
+  // content-hashed filenames, so they can be cached indefinitely.
+  // :file must be a single path segment (no slashes) — path-traversal safe.
+  {
+    type: "GET",
+    path: "/dashboard/assets/:file",
+    public: true,
+    name: "Pulse Frontend Assets",
+    handler: async (req: RouteRequest, res: RouteResponse, _runtime: IAgentRuntime) => {
+      const file = req.params?.file;
+      // Reject anything that could escape the assets directory.
+      if (!file || file.includes("..") || file.includes("/") || file.includes("\\")) {
+        err(res, "Invalid asset path", 400);
+        return;
+      }
+      serveFrontendFile(join(FRONTEND_DIR, "assets", file), res, true);
+    },
+  },
+
   // ── GET /pulse/queue ──────────────────────────────────────────────────────
   {
     type: "GET",
@@ -211,6 +303,7 @@ export const pulseRoutes: Route[] = [
           gmail: gmailInfo,
           calendar: calInfo,
           agentName: runtime.character?.name ?? "Pulse",
+          nosana: getMetrics(),
         });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);

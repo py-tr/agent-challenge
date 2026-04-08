@@ -1,4 +1,4 @@
-import type { StatusResponse } from "../api/pulseApi";
+import type { StatusResponse, NosanaMetrics } from "../api/pulseApi";
 
 interface Props {
   status: StatusResponse | null;
@@ -6,6 +6,8 @@ interface Props {
   error: string | null;
   onRefresh: () => void;
 }
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function timeAgo(iso: string | null): string {
   if (!iso) return "never";
@@ -18,17 +20,102 @@ function timeAgo(iso: string | null): string {
   return new Date(iso).toLocaleDateString();
 }
 
+function formatUptime(ms: number): string {
+  const s = Math.floor(ms / 1_000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  return rem > 0 ? `${h}h ${rem}m` : `${h}h`;
+}
+
+// Abbreviate the 40-char Nosana node ID for display
+function shortNodeId(nodeId: string | null): string {
+  if (!nodeId) return "local";
+  return nodeId.length > 12 ? nodeId.slice(0, 8) + "…" + nodeId.slice(-4) : nodeId;
+}
+
+// ─── Nosana GPU Panel ─────────────────────────────────────────────────────────
+
+function NosanaPanel({ nosana }: { nosana: NosanaMetrics }) {
+  if (!nosana.isNosanaNode) {
+    // Running locally — show a muted "local dev" indicator
+    return (
+      <div className="flex items-center gap-2 text-xs text-slate-600">
+        <span className="h-1.5 w-1.5 rounded-full bg-slate-600" />
+        <span>local dev</span>
+        <span className="text-slate-700">·</span>
+        <span>{nosana.llmCallCount} LLM calls</span>
+        <span className="text-slate-700">·</span>
+        <span>up {formatUptime(nosana.uptimeMs)}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+      {/* Nosana badge */}
+      <a
+        href={nosana.nodeUrl ?? undefined}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={`Nosana GPU node: ${nosana.nodeId}`}
+        className="inline-flex items-center gap-1.5 rounded-full border border-violet-800 bg-violet-950/60 px-2.5 py-0.5 text-violet-300 transition-colors hover:border-violet-600 hover:text-violet-200"
+      >
+        {/* Animated GPU dot */}
+        <span className="relative flex h-1.5 w-1.5">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-60" />
+          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-violet-400" />
+        </span>
+        <span className="font-medium">Nosana GPU</span>
+      </a>
+
+      {/* Node ID */}
+      <span className="font-mono text-slate-500" title={nosana.nodeId ?? ""}>
+        {shortNodeId(nosana.nodeId)}
+      </span>
+
+      <span className="hidden text-slate-700 sm:block">·</span>
+
+      {/* LLM call counter */}
+      <span className="hidden text-slate-400 sm:block">
+        <span className="font-semibold tabular-nums text-slate-300">
+          {nosana.llmCallCount}
+        </span>
+        {" "}inferences
+      </span>
+
+      <span className="hidden text-slate-700 sm:block">·</span>
+
+      {/* Uptime */}
+      <span className="hidden text-slate-500 sm:block">
+        up {formatUptime(nosana.uptimeMs)}
+      </span>
+
+      <span className="hidden text-slate-700 sm:block">·</span>
+
+      {/* Job type badge */}
+      <span className="hidden rounded bg-slate-800 px-1.5 py-0.5 font-mono text-slate-400 sm:block">
+        {nosana.jobType}
+      </span>
+    </div>
+  );
+}
+
+// ─── Status Bar ───────────────────────────────────────────────────────────────
+
 export function StatusBar({ status, lastUpdated, error, onRefresh }: Props) {
-  const pending = status?.queue.pending ?? 0;
+  const pending  = status?.queue.pending  ?? 0;
   const approved = status?.queue.approved ?? 0;
   const rejected = status?.queue.rejected ?? 0;
-  const gmailAt = status?.gmail.fetchedAt ?? null;
-  const msgCount = status?.gmail.messageCount ?? 0;
+  const nosana   = status?.nosana;
 
   return (
     <header className="sticky top-0 z-10 border-b border-slate-800 bg-surface-1/90 backdrop-blur-sm">
+      {/* ── Main row ─────────────────────────────────────────────────────── */}
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
-        {/* Left: brand */}
+        {/* Left: brand + live indicator */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <span className="text-lg font-bold tracking-tight text-white">
@@ -39,24 +126,11 @@ export function StatusBar({ status, lastUpdated, error, onRefresh }: Props) {
             </span>
           </div>
 
-          {/* Live indicator */}
           <div className="flex items-center gap-1.5 rounded-full border border-emerald-900 bg-emerald-950/50 px-2.5 py-1">
             <span className="h-1.5 w-1.5 animate-pulse_dot rounded-full bg-emerald-400" />
             <span className="text-xs font-medium text-emerald-400">Live</span>
           </div>
         </div>
-
-        {/* Center: Nosana GPU note */}
-        {gmailAt && (
-          <div className="hidden text-center text-xs text-slate-500 md:block">
-            Processed{" "}
-            <span className="font-medium text-slate-300">{msgCount} emails</span>{" "}
-            on Nosana GPU ·{" "}
-            <span className="font-medium text-slate-300">
-              {timeAgo(gmailAt)}
-            </span>
-          </div>
-        )}
 
         {/* Right: queue stats + refresh */}
         <div className="flex items-center gap-4">
@@ -100,7 +174,16 @@ export function StatusBar({ status, lastUpdated, error, onRefresh }: Props) {
         </div>
       </div>
 
-      {/* Error banner */}
+      {/* ── Nosana GPU panel row ─────────────────────────────────────────── */}
+      {nosana && (
+        <div className="border-t border-slate-900 bg-black/20 px-6 py-1.5">
+          <div className="mx-auto max-w-7xl">
+            <NosanaPanel nosana={nosana} />
+          </div>
+        </div>
+      )}
+
+      {/* ── Error banner ─────────────────────────────────────────────────── */}
       {error && (
         <div className="border-t border-red-900 bg-red-950/60 px-6 py-2 text-xs text-red-300">
           ⚠ Connection error: {error} — retrying every 5s
@@ -109,6 +192,8 @@ export function StatusBar({ status, lastUpdated, error, onRefresh }: Props) {
     </header>
   );
 }
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
 function Stat({
   label,

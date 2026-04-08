@@ -9,7 +9,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Environment files
+# Environment files — never bake credentials into the image
+.env
 .env.local
 .env.example
 .env.*.local

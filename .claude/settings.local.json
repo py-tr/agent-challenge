@@ -8,7 +8,13 @@
       "Bash(grep -o 'plugin\\\\.name.\\\\{0,60\\\\}routePath\\\\|routePath.\\\\{0,60\\\\}plugin\\\\.name\\\\|plugin\\\\.name.\\\\{0,80\\\\}route\\\\b' node_modules/@elizaos/core/dist/node/index.node.js)",
       "Bash(pnpm compile:*)",
       "Bash(pnpm test:*)",
-      "Bash(pnpm exec:*)"
+      "Bash(pnpm exec:*)",
+      "WebFetch(domain:learn.nosana.com)",
+      "Bash(docker build:*)",
+      "Bash(docker push:*)",
+      "Bash(docker run:*)",
+      "Bash(node -e ':*)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

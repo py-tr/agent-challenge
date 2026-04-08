@@ -20,6 +20,7 @@ const pulseCharacter = {
   username: "pulse",
   // plugin-bootstrap and plugin-openai are loaded by name from the character;
   // pulsePlugin is passed as an object in the agent's plugins array below.
+  // Web search is handled natively via webSearchAction (DuckDuckGo, no API key).
   plugins: ["@elizaos/plugin-bootstrap", "@elizaos/plugin-openai"],
   settings: {
     model: "Qwen3.5-27B-AWQ-4bit",

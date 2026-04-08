@@ -19,12 +19,15 @@ import { ModelType, type IAgentRuntime, type Plugin } from "@elizaos/core";
 import { PulseBackgroundService } from "./services/PulseBackgroundService.js";
 import { GmailMcpService } from "./services/GmailMcpService.js";
 import { CalendarMcpService } from "./services/CalendarMcpService.js";
+import { MorningBriefingService } from "./services/MorningBriefingService.js";
 import { processEmailsAction } from "./actions/ProcessEmailsAction.js";
 import { detectConflictsAction } from "./actions/DetectConflictsAction.js";
+import { webSearchAction } from "./actions/WebSearchAction.js";
 import { slibGuardEvaluator } from "./evaluators/SlibGuardEvaluator.js";
 import { pulseRoutes } from "./routes/pulseRoutes.js";
 import { actionQueueProvider } from "./providers/ActionQueueProvider.js";
 import { decisionHistoryProvider } from "./providers/DecisionHistoryProvider.js";
+import { recordLlmCall } from "./lib/nosanaMetrics.js";
 
 // ─── Chat Completions Shim ────────────────────────────────────────────────────
 
@@ -95,6 +98,9 @@ async function callChatCompletions(
     choices: Array<{ message: { content: string } }>;
   };
 
+  // Track every successful inference routed through this Nosana node.
+  recordLlmCall();
+
   return data.choices[0]?.message?.content ?? "";
 }
 
@@ -136,10 +142,12 @@ export const pulsePlugin: Plugin = {
   // GmailMcpService: starts first — runs DB migrations + token refresh heartbeat.
   // CalendarMcpService: wraps calendarClient with caching.
   // PulseBackgroundService: owns the 6-hour scheduled processing cycle.
-  services: [GmailMcpService, CalendarMcpService, PulseBackgroundService],
+  // MorningBriefingService: fires once on startup after a 5-second delay.
+  services: [GmailMcpService, CalendarMcpService, PulseBackgroundService, MorningBriefingService],
 
   // ── Actions ─────────────────────────────────────────────────────────────────
-  actions: [processEmailsAction, detectConflictsAction],
+  // webSearchAction: DuckDuckGo Instant Answer — no API key, runs on Nosana node.
+  actions: [processEmailsAction, detectConflictsAction, webSearchAction],
 
   // ── Providers ────────────────────────────────────────────────────────────────
   providers: [actionQueueProvider, decisionHistoryProvider],

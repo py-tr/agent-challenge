@@ -41,11 +41,22 @@ export interface QueueResponse {
   count: number;
 }
 
+export interface NosanaMetrics {
+  nodeId: string | null;
+  nodeUrl: string | null;
+  isNosanaNode: boolean;
+  llmCallCount: number;
+  uptimeMs: number;
+  jobType: string;
+  startedAt: string;
+}
+
 export interface StatusResponse {
   queue: { pending: number; approved: number; rejected: number };
   gmail: { fetchedAt: string | null; messageCount: number };
   calendar: { fetchedAt: string | null; eventCount: number };
   agentName: string;
+  nosana: NosanaMetrics;
 }
 
 export interface DecisionsResponse {
