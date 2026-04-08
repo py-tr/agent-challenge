@@ -42,7 +42,8 @@ Nosana will be providing an LLM-Endpoint, you are welcome to use your own, this 
 
 ### Challenge Overview
 
-Welcome to the Nosana AI Agent Hackathon! Your mission is to build and deploy an AI agent on Nosana. While we provide a weather agent as an example, your creativity is the limit. Build agents that:
+Welcome to the Nosana AI Agent Hackathon! Your mission is to build and deploy an AI agent on Nosana.
+While we provide a weather agent as an example, your creativity is the limit. Build agents that:
 
 **Beginner Level:**
 
@@ -78,32 +79,22 @@ Or any other innovative AI agent idea at your skill level!
 
 Here we will describe the steps needed to build an agent.
 
-#### Example: Weather Agent
+#### Folder Structure
 
 Provided in this repo, there is the `Weather Agent`.
 This is a fully working agent that allows a user to chat with an LLM, and fetches real time weather data for the provided location.
 
 There are two main folders we need to pay attention to:
 
-- [src/mastra/agents](./src/mastra/agents)
-- [src/mastra/tools](./src/mastra/tools)
+- [src/mastra/agents/weather-agent/](./src/mastra/agents/weather-agent/)
+- [src/mastra/agents/your-agents/](./src/mastra/agents/your-agent/)
 
-In `agents/` we define our agent using `new Agent({...})`, here define where we are serving our LLM, the instructions it should follow, and which tools (functions) it can call.
-
-in `tools/` we define the functions needed to create the tool that the agents can call. We need to define the structure of the input and output data, where to fetch resources, and our business logic.
-
----
-
-As a bonus, for the ambitious ones we have also provided the [src/mastra/workflows/](src/mastra/workflows/) folder as an example. This folder contains an example of how you can chain agents and tools to create a workflow, in this case, the user provides their location, and the agent retrieves the weather for the specified location, and suggests an itinerary.
-
-#### Your Agent
-
-We have provided two files for you to start your work:
-
-- [src/mastra/agents/your-agent.ts](src/mastra/agents/your-agents.ts)
-- [src/mastra/tools/your-tool.ts](src/mastra/tools/your-tool.ts)
+In `src/mastra/agents/weather-agent/` you will find a complete example of a working agent. Complete with Agent definition, API calls, interface definition, basically everything needed to get a full fledged working agent up and running.
+In `src/mastra/agents/your-agents/` you will find a bare bones example of the needed components, and imports to get started building your agent, we recommend you rename this folder, and it's files to get started.
 
 Rename these files to represent the purpose of your agent and tools. You can use the [Weather Agent Example](#example:_weather_agent) as a guide until you are done with it, and then you can delete these files before submitting your final submission.
+
+As a bonus, for the ambitious ones, we have also provided the [src/mastra/agents/weather-agent/weather-workflow.ts](./src/mastra/agents/weather-agent/weather-workflow.ts) file as an example. This file contains an example of how you can chain agents and tools to create a workflow, in this case, the user provides their location, and the agent retrieves the weather for the specified location, and suggests an itinerary.
 
 ### Submission Requirements
 
@@ -148,18 +139,30 @@ docker push yourusername/agent-challenge:latest
 
 ##### Nosana Job Definition
 
-We have included a nosana job definition at <nosana_mastra.json>, that you can use to publish your agent to the Nosana network.
+We have included a nosana job definition at <./nos_job_def/nosana_mastra.json>, that you can use to publish your agent to the Nosana network.
+
+**Deploying using [@nosana/cli](https://github.com/nosana-ci/nosana-cli/)**
 
 - Edit the file and add in your published docker image to the `image` property. `"image": "docker.io/yourusername/agent-challenge:latest"`
 - Download and install the [@nosana/cli](https://github.com/nosana-ci/nosana-cli/)
 - Load your wallet with some funds
   - Retrieve your address with: `nosana address`
   - Go to our [Discord](https://nosana.com/discord) and ask for some NOS and SOL to publish your job.
-  - Run: `nosana job post --file nosana_mastra.json --market nvidia-3060 --timeout 30`
+- Run: `nosana job post --file nosana_mastra.json --market nvidia-3060 --timeout 30`
+- Go to the dashboard[Nosana Dashboard](https://dashboard.nosana.com/deploy) to see your job
+
+**Deploying using the [Nosana Dashboard](https://dashboard.nosana.com/deploy)**
+
+- Make sure you have https://phantom.com/, installed for your browser.
+- Go to our [Discord](https://nosana.com/discord) and ask for some NOS and SOL to publish your job.
+- Click the `Expand` button, on the [Nosana Dashboard](https://dashboard.nosana.com/deploy)
+- Copy and Paste your edited Nosana Job Definition file into the Textarea
+- Choose an appropriate GPU for the AI model that you are using
+- Click `Deploy`
 
 #### 4. Video Demo
 
-- Record a 2-5 minute video demonstrating:
+- Record a 1-3 minute video demonstrating:
   - Your agent running on Nosana
   - Key features and functionality
   - Real-world use case demonstration
@@ -177,7 +180,7 @@ We have included a nosana job definition at <nosana_mastra.json>, that you can u
 ### Submission Process
 
 1. **Complete all requirements** listed above
-2. **Create a Pull Request** to this repository with:
+2. **Commit all of your changes to the `main` branch of your forked repository**
    - All your code changes
    - Updated README
    - Link to your Docker container
@@ -187,6 +190,10 @@ We have included a nosana job definition at <nosana_mastra.json>, that you can u
    - Tag @nosana_ai
    - Include a brief description of your agent
    - Add hashtag #NosanaAgentChallenge
+4. **Finalize your submission on the <https://earn.superteam.com/agent-challenge> page**
+
+- Remember to add your forked GitHub repository link
+- Remember to add a link to your X post.
 
 ### Judging Criteria
 
@@ -221,12 +228,11 @@ Submissions will be evaluated based on:
 - [Mastra Guide: Build an AI stock agent](https://mastra.ai/en/guides/guide/stock-agent)
 - [Nosana CLI](https://github.com/nosana-ci/nosana-cli)
 - [Docker Documentation](https://docs.docker.com)
-- [Example Weather Agent](src/mastra/agents/weather-agent.ts)
 
 ### Support
 
-- Join [Nosana Discord](https://discord.gg/nosana) for technical support
-- Follow [@nosana_ai](https://x.com/nosana_ai) for updates
+- Join [Nosana Discord](https://discord.gg/nosana) for technical support where we have dedicated [Builders Challenge Dev chat](https://discord.com/channels/236263424676331521/1354391113028337664) channel.
+- Follow [@nosana_ai](https://x.com/nosana_ai) for updates.
 
 ### Important Notes
 
@@ -235,5 +241,10 @@ Submissions will be evaluated based on:
 - Keep your Docker images lightweight
 - Document all dependencies clearly
 - Make your code reproducible
+- **Only one submission per participant**
+- **Submissions that do not compile, and do not meet the specified requirements, will not be considered**
+
+### Don’t Miss Nosana Builder Challenge Updates
 
 Good luck, builders! We can't wait to see the innovative AI agents you create for the Nosana ecosystem.
+**Happy Building!**
