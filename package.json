@@ -4,6 +4,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "deploy:agent": "nosana job post --file ./nos_job_def/nosana_mastra.json --market nvidia-3090 --timeout 30",
+    "deploy:qwen": "nosana job post --file ./nos_job_def/qwen_nos_jb.json --market nvidia-3090 --timeout 30",
     "dev": "mastra dev",
     "build": "mastra build",
     "start": "mastra start",
@@ -31,6 +33,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.0.4",
+    "@nosana/cli": "^1.0.52",
     "@types/node": "^24.0.3",
     "mastra": "^0.10.5",
     "typescript": "^5.8.3"
