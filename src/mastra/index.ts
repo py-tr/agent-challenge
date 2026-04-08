@@ -12,4 +12,8 @@ export const mastra = new Mastra({
     name: 'Mastra',
     level: 'info',
   }),
+  server: {
+    port: 8080,
+    timeout: 10000,
+  },
 });
