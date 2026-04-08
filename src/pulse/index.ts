@@ -18,7 +18,11 @@
 import { ModelType, type IAgentRuntime, type Plugin } from "@elizaos/core";
 import { PulseBackgroundService } from "./services/PulseBackgroundService.js";
 import { GmailMcpService } from "./services/GmailMcpService.js";
+import { CalendarMcpService } from "./services/CalendarMcpService.js";
 import { processEmailsAction } from "./actions/ProcessEmailsAction.js";
+import { detectConflictsAction } from "./actions/DetectConflictsAction.js";
+import { slibGuardEvaluator } from "./evaluators/SlibGuardEvaluator.js";
+import { pulseRoutes } from "./routes/pulseRoutes.js";
 
 // ─── Chat Completions Shim ────────────────────────────────────────────────────
 
@@ -128,16 +132,22 @@ export const pulsePlugin: Plugin = {
 
   // ── Services ────────────────────────────────────────────────────────────────
   // GmailMcpService: starts first — runs DB migrations + token refresh heartbeat.
+  // CalendarMcpService: wraps calendarClient with caching.
   // PulseBackgroundService: owns the 6-hour scheduled processing cycle.
-  services: [GmailMcpService, PulseBackgroundService],
+  services: [GmailMcpService, CalendarMcpService, PulseBackgroundService],
 
   // ── Actions ─────────────────────────────────────────────────────────────────
-  actions: [processEmailsAction],
+  actions: [processEmailsAction, detectConflictsAction],
 
-  // ── Filled in on subsequent days ────────────────────────────────────────────
+  // ── Providers ────────────────────────────────────────────────────────────────
   providers: [],
-  evaluators: [],
-  routes: [],
+
+  // ── Evaluators ───────────────────────────────────────────────────────────────
+  evaluators: [slibGuardEvaluator],
+
+  // ── Routes ───────────────────────────────────────────────────────────────────
+  routes: pulseRoutes,
+
   tests: [],
 };
 

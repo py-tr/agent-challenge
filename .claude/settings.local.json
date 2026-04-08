@@ -4,7 +4,8 @@
       "Bash(node -e \"const d = require\\(''''./node_modules/drizzle-orm/package.json''''\\); console.log\\(''''drizzle-orm:'''', d.version\\)\")",
       "Bash(ls node_modules/@electric-sql/pglite/dist/*.d.ts)",
       "Bash(node -e \"require\\(''''./node_modules/@electric-sql/pglite/dist/index.cjs''''\\); console.log\\(''''pglite: ok''''\\)\")",
-      "Bash(timeout 25 pnpm dev)"
+      "Bash(timeout 25 pnpm dev)",
+      "Bash(grep -o 'plugin\\\\.name.\\\\{0,60\\\\}routePath\\\\|routePath.\\\\{0,60\\\\}plugin\\\\.name\\\\|plugin\\\\.name.\\\\{0,80\\\\}route\\\\b' node_modules/@elizaos/core/dist/node/index.node.js)"
     ]
   }
 }
