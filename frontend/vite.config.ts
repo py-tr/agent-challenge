@@ -9,7 +9,12 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // Proxy only the backend API routes — NOT /pulse/dashboard/* which Vite
+      // ElizaOS core API (agents list, messaging sessions)
+      "/api": {
+        target: "http://localhost:3000",
+        changeOrigin: true,
+      },
+      // Proxy only the backend pulse routes — NOT /pulse/dashboard/* which Vite
       // itself serves. A broad "/pulse" rule would intercept the page load and
       // asset requests, sending them to the backend instead of Vite's dev
       // server, which breaks HMR entirely.

@@ -21,6 +21,10 @@ export default {
           "0%":   { opacity: "0", transform: "translateY(-6px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
+        "toast-in": {
+          "0%":   { opacity: "0", transform: "translateY(10px) scale(0.97)" },
+          "100%": { opacity: "1", transform: "translateY(0) scale(1)" },
+        },
         pulse_dot: {
           "0%, 100%": { opacity: "1" },
           "50%":      { opacity: "0.4" },
@@ -28,6 +32,7 @@ export default {
       },
       animation: {
         "slide-in": "slide-in 0.2s ease-out forwards",
+        "toast-in": "toast-in 0.2s ease-out forwards",
         pulse_dot:  "pulse_dot 2s ease-in-out infinite",
       },
     },

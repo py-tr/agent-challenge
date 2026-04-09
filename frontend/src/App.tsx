@@ -1,23 +1,80 @@
-import { useState } from "react";
-import { RefreshCw, AlertCircle } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { RefreshCw, AlertCircle, ChevronDown, ChevronUp, CheckCircle, XCircle } from "lucide-react";
 import { useActionQueue } from "./hooks/useActionQueue";
+import { agentApi } from "./api/pulseApi";
 import { Sidebar, type SidebarView } from "./components/Sidebar";
 import { ActionQueue } from "./components/ActionQueue";
 import { DecisionHistory } from "./components/DecisionHistory";
+import { ChatDrawer } from "./components/ChatDrawer";
 
-// ─── Stats row ────────────────────────────────────────────────────────────────
+// ─── Toast ────────────────────────────────────────────────────────────────────
 
-function StatCard({ label, value, sub }: { label: string; value: number; sub?: string }) {
+interface Toast {
+  id: string;
+  type: "approved" | "rejected";
+  leaving: boolean;
+}
+
+function ToastContainer({ toasts }: { toasts: Toast[] }) {
+  if (toasts.length === 0) return null;
   return (
-    <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
-      <p className="text-xs font-medium uppercase tracking-wide text-gray-400">{label}</p>
-      <p className="mt-1.5 text-2xl font-bold tabular-nums text-gray-900">{value}</p>
-      {sub && <p className="mt-0.5 text-xs text-gray-400">{sub}</p>}
+    <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 pointer-events-none">
+      {toasts.map((t) => (
+        <div
+          key={t.id}
+          className={[
+            "flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-lg text-white transition-all duration-300",
+            t.leaving ? "opacity-0 translate-y-2" : "animate-toast-in",
+            t.type === "approved" ? "bg-green-600" : "bg-gray-700",
+          ].join(" ")}
+        >
+          {t.type === "approved" ? (
+            <CheckCircle size={15} />
+          ) : (
+            <XCircle size={15} />
+          )}
+          {t.type === "approved" ? "Item approved" : "Item dismissed"}
+        </div>
+      ))}
     </div>
   );
 }
 
-// ─── Header bar (inside main area) ───────────────────────────────────────────
+function useToasts() {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const addToast = useCallback((type: "approved" | "rejected") => {
+    const id = crypto.randomUUID();
+    setToasts((prev) => [...prev, { id, type, leaving: false }]);
+
+    // Start fade-out at 1.7s
+    setTimeout(() => {
+      setToasts((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, leaving: true } : t))
+      );
+    }, 1700);
+
+    // Remove from DOM at 2s
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 2000);
+  }, []);
+
+  return { toasts, addToast };
+}
+
+// ─── Stats row ────────────────────────────────────────────────────────────────
+
+function StatCard({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
+      <p className="text-xs font-medium uppercase tracking-wide text-gray-400">{label}</p>
+      <p className="mt-1.5 text-3xl font-bold tabular-nums text-gray-900">{value}</p>
+    </div>
+  );
+}
+
+// ─── Top bar ──────────────────────────────────────────────────────────────────
 
 function TopBar({
   title,
@@ -79,6 +136,32 @@ function timeAgo(iso: string): string {
 
 export default function App() {
   const [view, setView] = useState<SidebarView>("queue");
+  const [activityCollapsed, setActivityCollapsed] = useState(false);
+
+  // Chat drawer
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [pendingAutoSend, setPendingAutoSend] = useState<string | null>(null);
+  const [agentId, setAgentId] = useState<string | null>(null);
+
+  // Toasts
+  const { toasts, addToast } = useToasts();
+
+  useEffect(() => {
+    agentApi.fetchAgentId().then(setAgentId).catch(() => {
+      // Agent unavailable — chat drawer shows bouncing dots
+    });
+  }, []);
+
+  function openChatWithContext(title: string, body: string) {
+    const snippet = body
+      .replace(/\*\*(.+?)\*\*/g, "$1")
+      .split("\n")
+      .find((l) => l.trim().length > 0)
+      ?.trim()
+      .slice(0, 100) ?? "";
+    setPendingAutoSend(`I need help with this item: "${title}". ${snippet}`);
+    setDrawerOpen(true);
+  }
 
   const {
     items,
@@ -87,24 +170,40 @@ export default function App() {
     loading,
     error,
     lastUpdated,
-    approve,
-    reject,
+    approve: _approve,
+    reject: _reject,
     refresh,
   } = useActionQueue();
+
+  // Wrap approve/reject to fire toasts
+  const approve = useCallback(
+    async (id: string) => {
+      await _approve(id);
+      addToast("approved");
+    },
+    [_approve, addToast]
+  );
+
+  const reject = useCallback(
+    async (id: string, reason?: string) => {
+      await _reject(id, reason);
+      addToast("rejected");
+    },
+    [_reject, addToast]
+  );
 
   const pending = status?.queue.pending ?? 0;
   const approved = status?.queue.approved ?? 0;
   const rejected = status?.queue.rejected ?? 0;
-
-  // Commitments = slib_reminder items currently pending
   const committedCount = items.filter((i) => i.type === "slib_reminder").length;
 
-  // Items to show for each view
-  const queueItems = view === "commitments"
-    ? items.filter((i) => i.type === "slib_reminder")
-    : items;
+  const queueItems =
+    view === "commitments"
+      ? items.filter((i) => i.type === "slib_reminder")
+      : items;
 
-  const viewTitle = view === "history" ? "History" : view === "commitments" ? "Commitments" : "Inbox";
+  const viewTitle =
+    view === "history" ? "History" : view === "commitments" ? "Commitments" : "Inbox";
   const viewSubtitle =
     view === "history"
       ? `${decisions?.total ?? 0} past decisions`
@@ -128,8 +227,17 @@ export default function App() {
         status={status}
       />
 
-      {/* Main content — offset by sidebar width */}
-      <div className="flex-1 pl-60">
+      {/* Main content */}
+      <div
+        className={`flex-1 pl-60 transition-all duration-300 ${drawerOpen ? "pr-96" : "pr-0"}`}
+      >
+        {drawerOpen && (
+          <div
+            className="pointer-events-none fixed inset-y-0 z-20 bg-black/5"
+            style={{ left: "240px", right: "384px" }}
+          />
+        )}
+
         <main className="mx-auto max-w-5xl px-8 py-8">
           <TopBar
             title={viewTitle}
@@ -139,53 +247,69 @@ export default function App() {
             onRefresh={refresh}
           />
 
-          {/* Stats row — only on queue/commitments views */}
           {view !== "history" && (
             <div className="mb-8 grid grid-cols-3 gap-4">
               <StatCard label="Emails processed" value={approved + rejected} />
               <StatCard
                 label="Conflicts resolved"
                 value={
-                  (decisions?.decisions ?? []).filter((d) => d.itemType === "conflict_resolution")
-                    .length
+                  (decisions?.decisions ?? []).filter(
+                    (d) => d.itemType === "conflict_resolution"
+                  ).length
                 }
               />
               <StatCard
                 label="Commitments tracked"
                 value={
-                  (decisions?.decisions ?? []).filter((d) => d.itemType === "slib_reminder").length
+                  (decisions?.decisions ?? []).filter(
+                    (d) => d.itemType === "slib_reminder"
+                  ).length
                 }
               />
             </div>
           )}
 
-          {/* Content */}
           {view === "history" ? (
             <DecisionHistory data={decisions} loading={loading} />
           ) : (
             <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-              {/* Queue — 2/3 width */}
               <section className="lg:col-span-2">
                 <ActionQueue
                   items={queueItems}
                   loading={loading}
                   onApprove={approve}
                   onReject={reject}
+                  onAskPulse={openChatWithContext}
                 />
               </section>
 
-              {/* History sidebar — 1/3 width */}
+              {/* Collapsible Activity panel */}
               <section className="lg:col-span-1">
                 <div className="mb-4 flex items-center justify-between">
-                  <h2 className="text-sm font-semibold text-gray-700">Recent Activity</h2>
-                  <button
-                    onClick={() => setView("history")}
-                    className="text-xs text-indigo-500 hover:text-indigo-700 font-medium"
-                  >
-                    View all
-                  </button>
+                  <h2 className="text-sm font-semibold text-gray-700">Activity</h2>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setView("history")}
+                      className="text-xs font-medium text-indigo-500 hover:text-indigo-700"
+                    >
+                      View all
+                    </button>
+                    <button
+                      onClick={() => setActivityCollapsed((v) => !v)}
+                      className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+                      title={activityCollapsed ? "Expand" : "Collapse"}
+                    >
+                      {activityCollapsed ? (
+                        <ChevronDown size={14} />
+                      ) : (
+                        <ChevronUp size={14} />
+                      )}
+                    </button>
+                  </div>
                 </div>
-                <DecisionHistory data={decisions} loading={loading} compact />
+                {!activityCollapsed && (
+                  <DecisionHistory data={decisions} loading={loading} compact />
+                )}
               </section>
             </div>
           )}
@@ -195,6 +319,18 @@ export default function App() {
           </footer>
         </main>
       </div>
+
+      {/* Chat drawer */}
+      <ChatDrawer
+        isOpen={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        agentId={agentId}
+        autoSendText={pendingAutoSend}
+        onAutoSendConsumed={() => setPendingAutoSend(null)}
+      />
+
+      {/* Toasts */}
+      <ToastContainer toasts={toasts} />
     </div>
   );
 }

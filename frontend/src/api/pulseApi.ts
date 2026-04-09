@@ -1,4 +1,5 @@
-// All fetch calls go through Vite's proxy: /pulse/* → localhost:3000/pulse/*
+// Pulse API:   /pulse/*              → proxied to localhost:3000 in dev
+// ElizaOS API: /api/agents, /api/messaging/sessions → proxied in dev
 
 export type ActionItemType =
   | "email_draft"
@@ -96,4 +97,65 @@ export const pulseApi = {
       `/pulse/reject/${id}`,
       { method: "POST", body: JSON.stringify({ reason: reason ?? null }) }
     ),
+};
+
+// ─── ElizaOS agent / sessions API ────────────────────────────────────────────
+
+export interface ElizaAgent {
+  id: string;
+  name?: string;
+}
+
+interface ElizaAgentListResponse {
+  success: boolean;
+  data: { agents: ElizaAgent[] };
+}
+
+interface SessionCreateResponse {
+  sessionId: string;
+}
+
+interface AgentResponseContent {
+  text: string;
+  thought?: string;
+  actions?: string[];
+}
+
+interface SendMessageResponse {
+  success: boolean;
+  agentResponse?: AgentResponseContent;
+}
+
+export const agentApi = {
+  /** Returns the first available agent's ID. */
+  fetchAgentId: async (): Promise<string> => {
+    const resp = await request<ElizaAgentListResponse>("/api/agents");
+    const id = resp.data?.agents?.[0]?.id;
+    if (!id) throw new Error("No agents available");
+    return id;
+  },
+
+  /**
+   * Create a messaging session for the given agent + user.
+   * Returns the sessionId to use for all subsequent messages.
+   */
+  createSession: async (agentId: string, userId: string): Promise<string> => {
+    const data = await request<SessionCreateResponse>("/api/messaging/sessions", {
+      method: "POST",
+      body: JSON.stringify({ agentId, userId }),
+    });
+    return data.sessionId;
+  },
+
+  /**
+   * Send a message in an existing session and wait for the agent response.
+   * Uses transport: "http" which blocks until the agent replies.
+   */
+  sendMessage: async (sessionId: string, content: string): Promise<string> => {
+    const data = await request<SendMessageResponse>(
+      `/api/messaging/sessions/${sessionId}/messages`,
+      { method: "POST", body: JSON.stringify({ content, transport: "http" }) }
+    );
+    return data.agentResponse?.text ?? "";
+  },
 };

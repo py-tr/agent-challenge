@@ -3,15 +3,18 @@
  * Rendered by ActionQueue when item.type === "slib_reminder".
  */
 
-import { useState } from "react";
-import { Check, X } from "lucide-react";
+import { useState, useRef } from "react";
+import { Check, X, MessageSquare } from "lucide-react";
 import type { ActionItem } from "../api/pulseApi";
 
 interface Props {
   item: ActionItem;
   onApprove: () => Promise<void>;
   onReject: (reason?: string) => Promise<void>;
+  onAskPulse?: () => void;
 }
+
+type FlashState = "idle" | "approve" | "reject" | "exit";
 
 function renderBody(text: string) {
   const parts = text.split(/\n\n+/);
@@ -37,28 +40,50 @@ function renderBody(text: string) {
   });
 }
 
-export function SlibGuardAlert({ item, onApprove, onReject }: Props) {
+export function SlibGuardAlert({ item, onApprove, onReject, onAskPulse }: Props) {
   const [busy, setBusy] = useState(false);
+  const [flash, setFlash] = useState<FlashState>("idle");
+  const animTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const meta = item.metadata as {
     deadline?: string;
     recipient?: string;
     verbatim?: string;
   } | null;
 
-  async function handle(action: () => Promise<void>) {
-    setBusy(true);
-    try {
-      await action();
-    } finally {
-      setBusy(false);
-    }
+  function triggerExit(type: "approve" | "reject") {
+    if (animTimer.current) clearTimeout(animTimer.current);
+    setFlash(type);
+    animTimer.current = setTimeout(() => setFlash("exit"), 200);
   }
 
+  async function handleApprove() {
+    triggerExit("approve");
+    setBusy(true);
+    try { await onApprove(); } finally { setBusy(false); }
+  }
+
+  async function handleReject() {
+    triggerExit("reject");
+    setBusy(true);
+    try { await onReject(); } finally { setBusy(false); }
+  }
+
+  const cardClass = [
+    "overflow-hidden rounded-xl border border-l-4 transition-all duration-300",
+    flash === "approve" ? "border-green-300 bg-green-50/80 shadow-sm" :
+    flash === "reject"  ? "border-red-200 bg-red-50/80 shadow-sm" :
+    flash === "exit"    ? "opacity-0 -translate-y-2 scale-[0.97] shadow-none pointer-events-none" :
+                          "border-amber-200 bg-amber-50 shadow-sm hover:shadow-md",
+  ].join(" ");
+
+  const borderColor =
+    flash === "approve" ? "#22c55e" :
+    flash === "reject"  ? "#ef4444" :
+    "#f59e0b";
+
   return (
-    <article
-      className="overflow-hidden rounded-xl border border-amber-200 bg-amber-50 shadow-sm transition-shadow hover:shadow-md"
-      style={{ borderLeft: "4px solid #f59e0b" }}
-    >
+    <article className={cardClass} style={{ borderLeft: `4px solid ${borderColor}` }}>
       {/* Card body */}
       <div className="p-5">
         {/* Top row */}
@@ -98,29 +123,37 @@ export function SlibGuardAlert({ item, onApprove, onReject }: Props) {
       </div>
 
       {/* Action bar */}
-      <div className="flex items-center justify-end gap-2 border-t border-amber-100 bg-amber-100/40 px-5 py-3">
-        <button
-          onClick={() => handle(onReject)}
-          disabled={busy}
-          className="btn border border-amber-200 bg-white py-1.5 px-3.5 text-xs text-amber-700 hover:border-amber-300 hover:bg-amber-50 disabled:opacity-50"
-        >
-          <X size={13} />
-          Dismiss
-        </button>
-        <button
-          onClick={() => handle(onApprove)}
-          disabled={busy}
-          className="btn bg-amber-500 py-1.5 px-3.5 text-xs text-white hover:bg-amber-600 active:scale-[0.97] disabled:opacity-50 shadow-sm"
-        >
-          {busy ? (
-            "…"
-          ) : (
-            <>
-              <Check size={13} />
-              Mark Handled
-            </>
-          )}
-        </button>
+      <div className="flex items-center justify-between gap-2 border-t border-amber-100 bg-amber-100/40 px-5 py-3">
+        {onAskPulse ? (
+          <button
+            onClick={onAskPulse}
+            disabled={busy}
+            className="btn border border-indigo-200 bg-white py-1.5 px-3 text-xs font-medium text-indigo-600 hover:bg-indigo-50 hover:border-indigo-300 transition-colors disabled:opacity-50"
+          >
+            <MessageSquare size={12} />
+            Ask Pulse
+          </button>
+        ) : (
+          <div />
+        )}
+
+        <div className="flex gap-2">
+          <button
+            onClick={() => void handleReject()}
+            disabled={busy}
+            className="btn border border-amber-200 bg-white py-1.5 px-3.5 text-xs text-amber-700 hover:border-amber-300 hover:bg-amber-50 disabled:opacity-50"
+          >
+            <X size={13} />
+            Dismiss
+          </button>
+          <button
+            onClick={() => void handleApprove()}
+            disabled={busy}
+            className="btn bg-amber-500 py-1.5 px-3.5 text-xs text-white hover:bg-amber-600 active:scale-[0.97] disabled:opacity-50 shadow-sm"
+          >
+            {busy ? "…" : (<><Check size={13} />Mark Handled</>)}
+          </button>
+        </div>
       </div>
     </article>
   );

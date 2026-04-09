@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Check, X, ChevronDown, ChevronUp, CheckCircle2 } from "lucide-react";
+import { useState, useRef } from "react";
+import { Check, X, ChevronDown, ChevronUp, CheckCircle2, MessageSquare } from "lucide-react";
 import type { ActionItem, ActionItemType } from "../api/pulseApi";
 import { SlibGuardAlert } from "./SlibGuardAlert";
 
@@ -8,6 +8,7 @@ interface Props {
   loading: boolean;
   onApprove: (id: string) => Promise<void>;
   onReject: (id: string, reason?: string) => Promise<void>;
+  onAskPulse?: (title: string, body: string) => void;
 }
 
 // ─── Type metadata ────────────────────────────────────────────────────────────
@@ -149,26 +150,43 @@ function BodyRenderer({ text }: { text: string }) {
 
 // ─── Item card ────────────────────────────────────────────────────────────────
 
+type FlashState = "idle" | "approve" | "reject" | "exit";
+
 function ItemCard({
   item,
   onApprove,
   onReject,
+  onAskPulse,
 }: {
   item: ActionItem;
   onApprove: () => Promise<void>;
   onReject: (reason?: string) => Promise<void>;
+  onAskPulse?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+  const [flash, setFlash] = useState<FlashState>("idle");
+  const animTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const meta = TYPE_META[item.type] ?? TYPE_META.email_draft;
 
-  async function handle(action: () => Promise<void>) {
+  function triggerExit(type: "approve" | "reject") {
+    if (animTimer.current) clearTimeout(animTimer.current);
+    setFlash(type);
+    animTimer.current = setTimeout(() => setFlash("exit"), 200);
+  }
+
+  async function handleApprove() {
+    triggerExit("approve");
     setBusy(true);
-    try {
-      await action();
-    } finally {
+    try { await onApprove(); } finally { setBusy(false); }
+  }
+
+  async function handleReject(reason?: string) {
+    triggerExit("reject");
+    setBusy(true);
+    try { await onReject(reason); } finally {
       setBusy(false);
       setShowRejectInput(false);
       setRejectReason("");
@@ -181,11 +199,24 @@ function ItemCard({
     ?.replace(/\*\*(.+?)\*\*/g, "$1")
     .slice(0, 180);
 
+  // Dynamic inline style: flash overrides the type-based left border color
+  const cardStyle: React.CSSProperties =
+    flash === "approve"
+      ? { borderLeft: "4px solid #22c55e" }
+      : flash === "reject"
+      ? { borderLeft: "4px solid #ef4444" }
+      : { borderLeft: `4px solid ${meta.borderColor}` };
+
+  const cardClass = [
+    "overflow-hidden rounded-xl border border-l-4 transition-all duration-300",
+    flash === "approve" ? "bg-green-50/70 border-green-200 shadow-sm" :
+    flash === "reject"  ? "bg-red-50/70 border-red-200 shadow-sm" :
+    flash === "exit"    ? "opacity-0 -translate-y-2 scale-[0.97] shadow-none pointer-events-none" :
+                          "bg-white border-gray-100 shadow-sm hover:shadow-md",
+  ].join(" ");
+
   return (
-    <article
-      className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm transition-shadow hover:shadow-md"
-      style={{ borderLeft: `4px solid ${meta.borderColor}` }}
-    >
+    <article className={cardClass} style={cardStyle}>
       {/* Card body */}
       <div className="p-5">
         {/* Top row: badges left, timestamp + expand right */}
@@ -244,12 +275,8 @@ function ItemCard({
             value={rejectReason}
             onChange={(e) => setRejectReason(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter")
-                void handle(() => onReject(rejectReason || undefined) as Promise<void>);
-              if (e.key === "Escape") {
-                setShowRejectInput(false);
-                setRejectReason("");
-              }
+              if (e.key === "Enter") void handleReject(rejectReason || undefined);
+              if (e.key === "Escape") { setShowRejectInput(false); setRejectReason(""); }
             }}
             className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
           />
@@ -257,54 +284,59 @@ function ItemCard({
       )}
 
       {/* Action bar */}
-      <div className="flex items-center justify-end gap-2 border-t border-gray-100 bg-gray-50/60 px-5 py-3">
-        {!showRejectInput ? (
-          <>
-            <button
-              onClick={() => setShowRejectInput(true)}
-              disabled={busy}
-              className="btn-reject py-1.5 px-3.5 text-xs"
-            >
-              <X size={13} />
-              Reject
-            </button>
-            <button
-              onClick={() => handle(onApprove)}
-              disabled={busy}
-              className="btn-approve py-1.5 px-3.5 text-xs"
-            >
-              {busy ? (
-                "…"
-              ) : (
-                <>
-                  <Check size={13} />
-                  Approve
-                </>
-              )}
-            </button>
-          </>
+      <div className="flex items-center justify-between gap-2 border-t border-gray-100 bg-gray-50/60 px-5 py-3">
+        {/* Ask Pulse — left side */}
+        {onAskPulse && !showRejectInput ? (
+          <button
+            onClick={onAskPulse}
+            disabled={busy}
+            className="btn border border-indigo-200 bg-white py-1.5 px-3 text-xs font-medium text-indigo-600 hover:bg-indigo-50 hover:border-indigo-300 transition-colors disabled:opacity-50"
+          >
+            <MessageSquare size={12} />
+            Ask Pulse
+          </button>
         ) : (
-          <>
-            <button
-              onClick={() => {
-                setShowRejectInput(false);
-                setRejectReason("");
-              }}
-              className="btn border border-gray-200 bg-white py-1.5 px-3.5 text-xs text-gray-500 hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() =>
-                void handle(() => onReject(rejectReason || undefined) as Promise<void>)
-              }
-              disabled={busy}
-              className="btn bg-red-600 py-1.5 px-3.5 text-xs text-white hover:bg-red-700 active:scale-[0.97]"
-            >
-              {busy ? "…" : "Confirm Reject"}
-            </button>
-          </>
+          <div />
         )}
+
+        {/* Approve / Reject — right side */}
+        <div className="flex items-center gap-2">
+          {!showRejectInput ? (
+            <>
+              <button
+                onClick={() => setShowRejectInput(true)}
+                disabled={busy}
+                className="btn-reject py-1.5 px-3.5 text-xs"
+              >
+                <X size={13} />
+                Reject
+              </button>
+              <button
+                onClick={() => void handleApprove()}
+                disabled={busy}
+                className="btn-approve py-1.5 px-3.5 text-xs"
+              >
+                {busy ? "…" : (<><Check size={13} />Approve</>)}
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => { setShowRejectInput(false); setRejectReason(""); }}
+                className="btn border border-gray-200 bg-white py-1.5 px-3.5 text-xs text-gray-500 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void handleReject(rejectReason || undefined)}
+                disabled={busy}
+                className="btn bg-red-600 py-1.5 px-3.5 text-xs text-white hover:bg-red-700 active:scale-[0.97]"
+              >
+                {busy ? "…" : "Confirm Reject"}
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </article>
   );
@@ -330,7 +362,7 @@ function EmptyState() {
 
 // ─── Action Queue ─────────────────────────────────────────────────────────────
 
-export function ActionQueue({ items, loading, onApprove, onReject }: Props) {
+export function ActionQueue({ items, loading, onApprove, onReject, onAskPulse }: Props) {
   const [filter, setFilter] = useState<FilterType>("all");
 
   if (loading) {
@@ -362,6 +394,7 @@ export function ActionQueue({ items, loading, onApprove, onReject }: Props) {
               item={item}
               onApprove={() => onApprove(item.id)}
               onReject={(reason) => onReject(item.id, reason)}
+              onAskPulse={onAskPulse ? () => onAskPulse(item.title, item.body) : undefined}
             />
           ) : (
             <ItemCard
@@ -369,6 +402,7 @@ export function ActionQueue({ items, loading, onApprove, onReject }: Props) {
               item={item}
               onApprove={() => onApprove(item.id)}
               onReject={(reason) => onReject(item.id, reason)}
+              onAskPulse={onAskPulse ? () => onAskPulse(item.title, item.body) : undefined}
             />
           )
         )}
