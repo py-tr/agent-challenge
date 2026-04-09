@@ -28,8 +28,11 @@ RUN npm install -g pnpm
 ENV ELIZAOS_TELEMETRY_DISABLED=true
 ENV DO_NOT_TRACK=1
 
-# Set production mode BEFORE builds so vite.config.ts routes output to
-# /app/frontend-static (outside /app/dist which Nosana mounts over at runtime).
+# PULSE_DOCKER_BUILD=1 tells vite.config.ts to output to /srv/pulse-frontend
+# (outside /app so the Nosana volume mount cannot wipe the built assets).
+# We cannot use NODE_ENV for this because Vite always forces it to "production"
+# during builds, making it useless as a Docker/local discriminator.
+ENV PULSE_DOCKER_BUILD=1
 ENV NODE_ENV=production
 ENV SERVER_PORT=3000
 

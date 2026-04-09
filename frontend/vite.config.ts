@@ -16,13 +16,15 @@ export default defineConfig({
     },
   },
   build: {
-    // In Docker (NODE_ENV=production) output to /app/frontend-static/ so it
-    // survives the Nosana volume mount that overwrites /app/dist/ at runtime.
-    // Locally (NODE_ENV unset or development) keep the normal ../dist/frontend path.
-    // In Docker (NODE_ENV=production) output outside /app entirely — Nosana
-    // mounts a volume over /app at runtime, wiping anything inside it.
-    // /srv/pulse-frontend is a standard Linux data-serving path Nosana won't touch.
-    outDir: process.env.NODE_ENV === "production"
+    // Vite always sets NODE_ENV=production before evaluating this config, so we
+    // cannot use NODE_ENV to distinguish Docker from local.  Instead the Dockerfile
+    // sets PULSE_DOCKER_BUILD=1 explicitly so we can branch on that without
+    // conflicting with anything Vite controls.
+    //
+    // Docker (PULSE_DOCKER_BUILD=1):  /srv/pulse-frontend — outside /app entirely
+    //   so the Nosana volume mount that covers /app cannot wipe the built assets.
+    // Local (unset):                  ../dist/frontend — standard Vite output path.
+    outDir: process.env.PULSE_DOCKER_BUILD
       ? "/srv/pulse-frontend"
       : "../dist/frontend",
     emptyOutDir: true,
