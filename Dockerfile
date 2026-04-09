@@ -12,8 +12,13 @@ RUN apt-get update && apt-get install -y \
   unzip \
   && rm -rf /var/lib/apt/lists/*
 
-# Install bun (required by elizaos CLI)
-RUN curl -fsSL https://bun.sh/install | bash
+# Install bun (required by elizaos CLI).
+# Copy the binary to /usr/local/bin with world-executable permissions so it
+# is accessible to any user — Nosana may run the container as a non-root user
+# and /root/.bun/bin is not accessible outside of root's PATH.
+RUN curl -fsSL https://bun.sh/install | bash && \
+    cp /root/.bun/bin/bun /usr/local/bin/bun && \
+    chmod 755 /usr/local/bin/bun
 ENV PATH="/root/.bun/bin:$PATH"
 
 # Install pnpm
