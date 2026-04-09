@@ -1,5 +1,5 @@
 /**
- * SlibGuardAlert — highlighted amber card for commitment reminders.
+ * SlibGuardAlert — highlighted card for commitment reminders.
  * Rendered by ActionQueue when item.type === "slib_reminder".
  */
 
@@ -12,7 +12,6 @@ interface Props {
   onReject: (reason?: string) => Promise<void>;
 }
 
-/** Very minimal markdown: **bold**, > blockquote, \n\n paragraphs */
 function renderBody(text: string) {
   const parts = text.split(/\n\n+/);
   return parts.map((para, i) => {
@@ -21,7 +20,7 @@ function renderBody(text: string) {
       return (
         <blockquote
           key={i}
-          className="my-2 border-l-2 border-amber-500 pl-3 text-slate-300 italic"
+          className="my-2 border-l-2 border-amber-700/60 pl-3 text-xs italic text-slate-400"
           dangerouslySetInnerHTML={{ __html: inner }}
         />
       );
@@ -30,7 +29,7 @@ function renderBody(text: string) {
     return (
       <p
         key={i}
-        className="text-sm leading-relaxed text-slate-300"
+        className="text-xs leading-relaxed text-slate-400"
         dangerouslySetInnerHTML={{ __html: html }}
       />
     );
@@ -55,17 +54,19 @@ export function SlibGuardAlert({ item, onApprove, onReject }: Props) {
   }
 
   return (
-    <article className="animate-slide-in overflow-hidden rounded-xl border border-amber-800/60 bg-amber-950/20">
-      {/* Amber header stripe */}
-      <div className="flex items-center justify-between border-b border-amber-800/40 bg-amber-950/40 px-4 py-2.5">
-        <div className="flex items-center gap-2">
-          <span className="text-amber-400">⏰</span>
-          <span className="text-xs font-semibold uppercase tracking-wider text-amber-400">
-            Slib Guard — Commitment Reminder
+    <article className="animate-slide-in overflow-hidden rounded-lg border border-l-2 border-amber-800/50 border-l-amber-600 bg-surface-2">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-amber-900/30 bg-amber-950/20 px-4 py-2.5">
+        <div className="flex items-center gap-2.5">
+          <span className="badge bg-amber-950/60 text-amber-400 border border-amber-800/40 text-xs">
+            Commitment
+          </span>
+          <span className="text-xs text-amber-500/80">
+            You made a commitment — approve to confirm it's handled
           </span>
         </div>
         {meta?.deadline && (
-          <span className="rounded-full bg-amber-900/60 px-2.5 py-0.5 text-xs font-medium text-amber-300">
+          <span className="shrink-0 rounded bg-amber-950/60 border border-amber-800/40 px-2 py-0.5 text-xs text-amber-500">
             Due {formatDeadline(meta.deadline)}
           </span>
         )}
@@ -73,29 +74,29 @@ export function SlibGuardAlert({ item, onApprove, onReject }: Props) {
 
       {/* Body */}
       <div className="space-y-2 px-4 py-4">
-        <h3 className="font-semibold text-white">{item.title}</h3>
+        <h3 className="text-sm font-semibold text-slate-100">{item.title}</h3>
         <div className="space-y-1">{renderBody(item.body)}</div>
       </div>
 
       {/* Actions */}
-      <div className="flex items-center justify-between border-t border-amber-800/30 px-4 py-3">
-        <span className="text-xs text-slate-600">
+      <div className="flex items-center justify-between border-t border-slate-800/50 px-4 py-2.5">
+        <span className="text-xs text-slate-700">
           Detected {relativeTime(item.createdAt)}
         </span>
         <div className="flex gap-2">
           <button
             onClick={() => handle(onReject)}
             disabled={busy}
-            className="btn border border-slate-700 text-slate-400 hover:border-amber-700 hover:text-amber-300 disabled:opacity-40"
+            className="btn border border-slate-800 text-xs text-slate-600 hover:border-slate-700 hover:text-slate-400 disabled:opacity-40"
           >
             Dismiss
           </button>
           <button
             onClick={() => handle(onApprove)}
             disabled={busy}
-            className="btn bg-amber-600 text-white hover:bg-amber-500 active:scale-95 disabled:opacity-40"
+            className="btn bg-amber-700 text-xs text-white hover:bg-amber-600 active:scale-95 disabled:opacity-40"
           >
-            {busy ? "…" : "✓ On track"}
+            {busy ? "…" : "Mark Handled"}
           </button>
         </div>
       </div>

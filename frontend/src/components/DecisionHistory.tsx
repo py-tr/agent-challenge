@@ -5,43 +5,43 @@ interface Props {
   loading: boolean;
 }
 
-// Map itemType → short display label
 const TYPE_LABEL: Record<string, string> = {
-  email_draft:         "Email",
-  conflict_resolution: "Conflict",
+  email_draft:         "Email Draft",
+  conflict_resolution: "Calendar Conflict",
   slib_reminder:       "Commitment",
   follow_up:           "Follow-up",
 };
 
 const TYPE_BADGE: Record<string, string> = {
-  email_draft:         "bg-blue-900/50 text-blue-300",
-  conflict_resolution: "bg-red-900/50 text-red-300",
-  slib_reminder:       "bg-amber-900/50 text-amber-300",
-  follow_up:           "bg-purple-900/50 text-purple-300",
+  email_draft:         "bg-blue-950/50 text-blue-500 border border-blue-900/50",
+  conflict_resolution: "bg-red-950/50 text-red-500 border border-red-900/50",
+  slib_reminder:       "bg-amber-950/50 text-amber-500 border border-amber-900/50",
+  follow_up:           "bg-purple-950/50 text-purple-500 border border-purple-900/50",
 };
 
 export function DecisionHistory({ data, loading }: Props) {
   const decisions = data?.decisions ?? [];
-  const patterns = data?.patterns ?? [];
-  const total = data?.total ?? 0;
+  const patterns  = data?.patterns  ?? [];
+  const total     = data?.total     ?? 0;
 
   return (
-    <aside className="flex flex-col gap-4">
+    <aside className="flex flex-col gap-5">
       {/* Pattern summary — shown when 10+ decisions exist */}
       {total >= 10 && patterns.length > 0 && (
         <PatternSummary patterns={patterns} total={total} />
       )}
 
       {/* History panel */}
-      <div className="overflow-hidden rounded-xl border border-slate-800 bg-surface-2">
-        {/* Header with left accent bar */}
-        <div className="flex items-center justify-between border-b border-slate-800 bg-surface-3 px-4 py-3">
+      <div className="overflow-hidden rounded-lg border border-slate-800/60 bg-surface-2">
+        <div className="flex items-center justify-between border-b border-slate-800/60 bg-surface-3 px-4 py-3">
           <div className="flex items-center gap-2">
-            <div className="h-4 w-0.5 rounded-full bg-slate-500" />
-            <h2 className="text-sm font-semibold text-white">Decision History</h2>
+            <div className="h-3.5 w-0.5 rounded-full bg-slate-700" />
+            <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+              History
+            </h2>
           </div>
           {total > 0 && (
-            <span className="rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-400">
+            <span className="rounded bg-surface-4 px-1.5 py-0.5 text-xs text-slate-600">
               {total} total
             </span>
           )}
@@ -52,24 +52,26 @@ export function DecisionHistory({ data, loading }: Props) {
             {[1, 2, 3, 4, 5].map((n) => (
               <div
                 key={n}
-                className="h-16 animate-pulse rounded-lg border border-slate-800/50 bg-surface-3"
+                className="h-14 animate-pulse rounded border border-slate-800/40 bg-surface-3"
               />
             ))}
           </div>
         ) : decisions.length === 0 ? (
           <div className="px-4 py-12 text-center">
-            <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full border border-slate-800 bg-surface-3 text-lg">
-              📋
+            <div className="mx-auto mb-3 flex h-9 w-9 items-center justify-center rounded-full border border-slate-800/60 bg-surface-3">
+              <svg className="h-4 w-4 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              </svg>
             </div>
-            <p className="text-sm font-medium text-slate-500">No decisions yet</p>
-            <p className="mt-1 text-xs text-slate-700">
-              Approve or reject items to build history.
+            <p className="text-sm font-medium text-slate-600">No decisions yet</p>
+            <p className="mt-1 text-xs text-slate-800 leading-relaxed">
+              Approve or reject items from the queue<br />to build your decision history.
             </p>
           </div>
         ) : (
           <ul
-            className="divide-y divide-slate-800/50 overflow-y-auto"
-            style={{ maxHeight: "calc(100vh - 300px)" }}
+            className="divide-y divide-slate-800/40 overflow-y-auto"
+            style={{ maxHeight: "calc(100vh - 320px)" }}
           >
             {decisions.map((d) => (
               <DecisionRow key={d.id} decision={d} />
@@ -82,56 +84,53 @@ export function DecisionHistory({ data, loading }: Props) {
 }
 
 function DecisionRow({ decision: d }: { decision: Decision }) {
-  const approved = d.decision === "approved";
-  const label = d.title ?? `Item ${d.actionItemId.slice(0, 8)}`;
-  const typeLabel = d.itemType ? (TYPE_LABEL[d.itemType] ?? d.itemType) : null;
-  const typeBadgeClass = d.itemType ? (TYPE_BADGE[d.itemType] ?? "bg-slate-800 text-slate-400") : "";
+  const approved    = d.decision === "approved";
+  const label       = d.title ?? `Item ${d.actionItemId.slice(0, 8)}`;
+  const typeLabel   = d.itemType ? (TYPE_LABEL[d.itemType] ?? d.itemType) : null;
+  const typeBadge   = d.itemType ? (TYPE_BADGE[d.itemType] ?? "bg-surface-3 text-slate-500 border border-slate-800/40") : "";
 
   return (
-    <li className="group flex items-start gap-3 px-4 py-3 transition-colors hover:bg-surface-3">
-      {/* Decision indicator — left accent */}
+    <li className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-surface-3">
+      {/* Decision indicator dot */}
       <div
-        className={`mt-1 h-2 w-2 shrink-0 rounded-full ${
-          approved ? "bg-emerald-400" : "bg-red-400"
+        className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
+          approved ? "bg-emerald-500" : "bg-red-600"
         }`}
       />
 
-      {/* Main content */}
       <div className="min-w-0 flex-1 space-y-1.5">
         {/* Title */}
-        <p className="truncate text-sm font-medium leading-snug text-slate-200">
+        <p className="truncate text-xs font-medium leading-snug text-slate-300">
           {label}
         </p>
 
         {/* Badges row */}
         <div className="flex flex-wrap items-center gap-1.5">
-          {/* Approved / Rejected badge */}
           <span
-            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${
+            className={`badge text-xs font-semibold ${
               approved
-                ? "bg-emerald-900/60 text-emerald-400 ring-1 ring-emerald-800/50"
-                : "bg-red-900/60 text-red-400 ring-1 ring-red-800/50"
+                ? "bg-emerald-950/50 text-emerald-500 border border-emerald-900/50"
+                : "bg-red-950/50 text-red-500 border border-red-900/50"
             }`}
           >
-            {approved ? "✓" : "✕"} {approved ? "Approved" : "Rejected"}
+            {approved ? "Approved" : "Rejected"}
           </span>
 
-          {/* Type badge */}
           {typeLabel && (
-            <span className={`rounded-full px-2 py-0.5 text-xs ${typeBadgeClass}`}>
+            <span className={`badge text-xs ${typeBadge}`}>
               {typeLabel}
             </span>
           )}
         </div>
 
-        {/* Reason + timestamp row */}
+        {/* Reason + timestamp */}
         <div className="flex items-center justify-between gap-2">
           {d.reason ? (
-            <p className="truncate text-xs italic text-slate-600">"{d.reason}"</p>
+            <p className="truncate text-xs italic text-slate-700">"{d.reason}"</p>
           ) : (
             <span />
           )}
-          <p className="shrink-0 text-xs text-slate-700">{relativeTime(d.decidedAt)}</p>
+          <p className="shrink-0 text-xs text-slate-800">{relativeTime(d.decidedAt)}</p>
         </div>
       </div>
     </li>
@@ -146,41 +145,42 @@ function PatternSummary({
   total: number;
 }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-800 bg-surface-2">
-      {/* Header */}
-      <div className="flex items-center gap-2 border-b border-slate-800 bg-surface-3 px-4 py-3">
-        <div className="h-4 w-0.5 rounded-full bg-slate-500" />
-        <h2 className="text-sm font-semibold text-white">Your Patterns</h2>
-        <span className="ml-auto text-xs text-slate-600">{total} decisions</span>
+    <div className="overflow-hidden rounded-lg border border-slate-800/60 bg-surface-2">
+      <div className="flex items-center gap-2 border-b border-slate-800/60 bg-surface-3 px-4 py-3">
+        <div className="h-3.5 w-0.5 rounded-full bg-slate-700" />
+        <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+          Your Patterns
+        </h2>
+        <span className="ml-auto text-xs text-slate-700">{total} decisions</span>
       </div>
 
-      <div className="space-y-3 px-4 py-4">
+      <div className="space-y-4 px-4 py-4">
         {patterns.map((p) => {
           const approvedTotal = p.approved + p.rejected;
           const pct =
             approvedTotal > 0 ? Math.round((p.approved / approvedTotal) * 100) : 0;
           const label = TYPE_LABEL[p.type] ?? p.type.replace(/_/g, " ");
           const barColor =
-            pct >= 70 ? "bg-emerald-500" : pct >= 40 ? "bg-amber-500" : "bg-red-500";
+            pct >= 70 ? "bg-emerald-600" : pct >= 40 ? "bg-amber-600" : "bg-red-700";
           const pctColor =
-            pct >= 70 ? "text-emerald-400" : pct >= 40 ? "text-amber-400" : "text-red-400";
+            pct >= 70 ? "text-emerald-500" : pct >= 40 ? "text-amber-500" : "text-red-500";
 
           return (
             <div key={p.type}>
               <div className="mb-1.5 flex items-center justify-between text-xs">
-                <span className="text-slate-400">{label}</span>
-                <span className={`font-semibold tabular-nums ${pctColor}`}>
-                  {pct}%
+                <span className="text-slate-500">{label}</span>
+                <span className={`tabular-nums font-semibold ${pctColor}`}>
+                  {pct}% approved
                 </span>
               </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
+              <div className="h-1 overflow-hidden rounded-full bg-slate-800">
                 <div
                   className={`h-full rounded-full transition-all duration-700 ${barColor}`}
                   style={{ width: `${pct}%` }}
                 />
               </div>
-              <p className="mt-1 text-right text-xs text-slate-700">
-                {p.approved}✓ {p.rejected}✕
+              <p className="mt-1 text-right text-xs text-slate-800">
+                {p.approved} approved · {p.rejected} rejected
               </p>
             </div>
           );
