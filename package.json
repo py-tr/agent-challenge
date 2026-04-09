@@ -7,8 +7,11 @@
   "scripts": {
     "compile": "tsc",
     "compile:watch": "tsc -w",
-    "start": "elizaos start",
+    "build:frontend": "cd frontend && pnpm build",
+    "predev": "cd frontend && pnpm build",
     "dev": "elizaos dev",
+    "dev:hot": "concurrently -n frontend,agent -c blue,green \"cd frontend && pnpm dev\" \"elizaos dev\"",
+    "start": "elizaos start",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -23,6 +26,7 @@
   "devDependencies": {
     "@elizaos/cli": "^1.0.0",
     "@types/node": "^22.0.0",
+    "concurrently": "^9.2.1",
     "typescript": "^5.0.0",
     "vitest": "^2.1.8"
   }
