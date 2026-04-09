@@ -44,14 +44,14 @@ COPY . .
 # 1. Compile TypeScript → /app/dist/
 RUN pnpm compile
 
-# 2. Create static dir and build React frontend into it.
-#    NODE_ENV=production is already set above, so vite.config.ts routes output
-#    to /app/frontend-static/ instead of ../dist/frontend.
-RUN mkdir -p /app/frontend-static
+# 2. Build React frontend to /srv/pulse-frontend/ — completely outside /app so
+#    the Nosana volume mount (which covers all of /app) cannot wipe it at runtime.
+#    NODE_ENV=production is already set above; vite.config.ts routes output there.
+RUN mkdir -p /srv/pulse-frontend
 RUN cd frontend && pnpm run build
 
 # Verify the static files are where we expect them.
-RUN ls -la /app/frontend-static/
+RUN ls -la /srv/pulse-frontend/
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
 RUN mkdir -p /app/data

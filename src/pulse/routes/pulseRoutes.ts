@@ -44,12 +44,13 @@ import { CalendarMcpService } from "../services/CalendarMcpService.js";
 
 // ─── Frontend static-file serving ────────────────────────────────────────────
 
-// In Docker (NODE_ENV=production) the frontend is built to /app/frontend-static/
-// which sits outside /app/dist/ — Nosana mounts a volume over /app/dist/ at
-// runtime, which would wipe dist/frontend/ if we kept it there.
-// Locally (NODE_ENV unset) resolve relative to the compiled file as before.
+// In Docker (NODE_ENV=production) the frontend is built to /srv/pulse-frontend/
+// which is completely outside /app — Nosana mounts a volume over /app at runtime,
+// wiping everything inside it including /app/dist/ and /app/frontend-static/.
+// /srv/pulse-frontend is a standard Linux data-serving path Nosana won't touch.
+// Locally (NODE_ENV unset) resolve relative to the compiled file.
 const FRONTEND_DIR = process.env.NODE_ENV === "production"
-  ? "/app/frontend-static"
+  ? "/srv/pulse-frontend"
   : resolve(dirname(fileURLToPath(import.meta.url)), "../../../dist/frontend");
 
 /** Content-Type mapping for files emitted by Vite. */

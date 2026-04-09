@@ -19,8 +19,11 @@ export default defineConfig({
     // In Docker (NODE_ENV=production) output to /app/frontend-static/ so it
     // survives the Nosana volume mount that overwrites /app/dist/ at runtime.
     // Locally (NODE_ENV unset or development) keep the normal ../dist/frontend path.
+    // In Docker (NODE_ENV=production) output outside /app entirely — Nosana
+    // mounts a volume over /app at runtime, wiping anything inside it.
+    // /srv/pulse-frontend is a standard Linux data-serving path Nosana won't touch.
     outDir: process.env.NODE_ENV === "production"
-      ? "/app/frontend-static"
+      ? "/srv/pulse-frontend"
       : "../dist/frontend",
     emptyOutDir: true,
   },
