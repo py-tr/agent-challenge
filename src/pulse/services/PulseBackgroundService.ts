@@ -36,8 +36,10 @@ import {
   insertActionItem,
   getPendingReminders,
   markReminderSent,
+  countByStatus,
 } from "../db/queries.js";
 import { actionItems, type Db } from "../db/schema.js";
+import { seedDemoData } from "../lib/seedDemoData.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -185,13 +187,52 @@ export class PulseBackgroundService extends Service {
       `Task ID: ${this.taskId} · Cycle every ${CYCLE_INTERVAL_MS / 3_600_000}h`
     );
 
-    // 3. Run one cycle immediately so the queue is populated on first launch,
+    // 3. Auto-seed demo data when requested and the queue is empty.
+    //    Runs before the first processing cycle so the dashboard is populated
+    //    immediately on Nosana deployments without manual intervention.
+    if (process.env.PULSE_SEED_ON_START === "true") {
+      await this.maybeSeedDemo();
+    }
+
+    // 4. Run one cycle immediately so the queue is populated on first launch,
     //    then repeat on the schedule.
     void this.runProcessingCycle();
 
     this.cycleInterval = setInterval(() => {
       void this.runProcessingCycle();
     }, CYCLE_INTERVAL_MS);
+  }
+
+  // ── Demo seed ─────────────────────────────────────────────────────────────
+
+  /**
+   * Seeds demo data only when the pending queue is empty, so real data is
+   * never overwritten. Called once at startup when PULSE_SEED_ON_START=true.
+   */
+  private async maybeSeedDemo(): Promise<void> {
+    try {
+      const db      = this.runtime.db as unknown as Db;
+      const pending = await countByStatus(db, "pending");
+
+      if (pending > 0) {
+        console.log(
+          `[Pulse] Demo seed skipped — queue already has ${pending} pending item(s).`
+        );
+        return;
+      }
+
+      const result = await seedDemoData(db);
+      console.log(
+        `[Pulse] Demo seed complete — ` +
+        `${result.pending} pending items, ${result.historical} historical decisions inserted.`
+      );
+    } catch (err) {
+      // Non-fatal: a seed failure should never prevent the agent from starting.
+      console.error(
+        "[Pulse] Demo seed failed:",
+        err instanceof Error ? err.message : String(err)
+      );
+    }
   }
 
   // ── Public API ────────────────────────────────────────────────────────────

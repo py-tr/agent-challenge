@@ -85,12 +85,25 @@ describe("resolveDate", () => {
 
 describe("computeRemindAt", () => {
   it("schedules reminder one calendar day before deadline at 09:00", () => {
-    // Deadline: 2026-04-10 (Friday) → reminder: 2026-04-09 (Thursday) at 09:00
-    const remindAt = computeRemindAt("2026-04-10");
+    // Use a deadline 30 days from now so the reminder date (29 days from now)
+    // is always in the future — avoids a date-sensitive failure when the
+    // hardcoded date passes.
+    const deadline = new Date();
+    deadline.setDate(deadline.getDate() + 30);
+    const yyyy = deadline.getFullYear();
+    const mm   = String(deadline.getMonth() + 1).padStart(2, "0");
+    const dd   = String(deadline.getDate()).padStart(2, "0");
+    const deadlineStr = `${yyyy}-${mm}-${dd}`;
+
+    const remindAt = computeRemindAt(deadlineStr);
     const d = new Date(remindAt);
-    expect(d.getFullYear()).toBe(2026);
-    expect(d.getMonth()).toBe(3); // April = 3
-    expect(d.getDate()).toBe(9);
+
+    // Reminder should be the day before the deadline.
+    const expected = new Date(deadline);
+    expected.setDate(expected.getDate() - 1);
+    expect(d.getFullYear()).toBe(expected.getFullYear());
+    expect(d.getMonth()).toBe(expected.getMonth());
+    expect(d.getDate()).toBe(expected.getDate());
     expect(d.getHours()).toBe(9);
     expect(d.getMinutes()).toBe(0);
   });
