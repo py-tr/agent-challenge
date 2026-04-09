@@ -16,7 +16,12 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: "../dist/frontend",
+    // In Docker (NODE_ENV=production) output to /app/frontend-static/ so it
+    // survives the Nosana volume mount that overwrites /app/dist/ at runtime.
+    // Locally (NODE_ENV unset or development) keep the normal ../dist/frontend path.
+    outDir: process.env.NODE_ENV === "production"
+      ? "/app/frontend-static"
+      : "../dist/frontend",
     emptyOutDir: true,
   },
 });

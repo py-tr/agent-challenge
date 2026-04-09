@@ -23,7 +23,7 @@
  *   GET  localhost:3000/api/agents/{agentId}/plugins/pulse/queue
  */
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve, extname, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MemoryType, type Route, type RouteRequest, type RouteResponse, type IAgentRuntime } from "@elizaos/core";
@@ -44,24 +44,13 @@ import { CalendarMcpService } from "../services/CalendarMcpService.js";
 
 // ─── Frontend static-file serving ────────────────────────────────────────────
 
-// Resolve relative to the compiled file (dist/pulse/routes/pulseRoutes.js),
-// not process.cwd() which varies depending on how ElizaOS launches the agent.
-const __filename = fileURLToPath(import.meta.url);
-const __dirname  = dirname(__filename);
-/** Resolved path to the built React SPA (dist/frontend/ from project root). */
-const FRONTEND_DIR = resolve(__dirname, "../../../dist/frontend");
-
-// Debug: log resolved paths and actual filesystem state on module load.
-console.log("[Pulse:Routes] __filename:", __filename);
-console.log("[Pulse:Routes] __dirname:", __dirname);
-console.log("[Pulse:Routes] FRONTEND_DIR:", FRONTEND_DIR);
-console.log("[Pulse:Routes] cwd:", process.cwd());
-try {
-  console.log("[Pulse:Routes] /app/dist contents:", readdirSync("/app/dist"));
-} catch (e) {
-  console.log("[Pulse:Routes] /app/dist contents: ERROR -", (e as Error).message);
-}
-console.log("[Pulse:Routes] /app/dist/frontend exists:", existsSync("/app/dist/frontend"));
+// In Docker (NODE_ENV=production) the frontend is built to /app/frontend-static/
+// which sits outside /app/dist/ — Nosana mounts a volume over /app/dist/ at
+// runtime, which would wipe dist/frontend/ if we kept it there.
+// Locally (NODE_ENV unset) resolve relative to the compiled file as before.
+const FRONTEND_DIR = process.env.NODE_ENV === "production"
+  ? "/app/frontend-static"
+  : resolve(dirname(fileURLToPath(import.meta.url)), "../../../dist/frontend");
 
 /** Content-Type mapping for files emitted by Vite. */
 const MIME: Record<string, string> = {
@@ -181,8 +170,6 @@ export const pulseRoutes: Route[] = [
     name: "Pulse Dashboard",
     handler: async (_req: RouteRequest, res: RouteResponse, _runtime: IAgentRuntime) => {
       const indexPath = join(FRONTEND_DIR, "index.html");
-      console.log("[Pulse:Dashboard] FRONTEND_DIR:", FRONTEND_DIR);
-      console.log("[Pulse:Dashboard] index.html exists:", existsSync(indexPath));
       if (!existsSync(indexPath)) {
         // Frontend has not been built yet — return a helpful error instead of a blank 404.
         res.status(503).send(

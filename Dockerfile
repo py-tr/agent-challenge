@@ -3,7 +3,6 @@
 FROM node:23-slim AS base
 
 # ── System dependencies ────────────────────────────────────────────────────────
-# python3/make/g++ for native modules (e.g. better-sqlite3)
 RUN apt-get update && apt-get install -y \
   python3 \
   make \
@@ -24,10 +23,14 @@ RUN npm install -g pnpm
 ENV ELIZAOS_TELEMETRY_DISABLED=true
 ENV DO_NOT_TRACK=1
 
+# Set production mode BEFORE builds so vite.config.ts routes output to
+# /app/frontend-static (outside /app/dist which Nosana mounts over at runtime).
+ENV NODE_ENV=production
+ENV SERVER_PORT=3000
+
 WORKDIR /app
 
 # ── Dependency install (cached by lockfile) ───────────────────────────────────
-# Copy only manifests first so this layer is invalidated only when deps change.
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
@@ -38,23 +41,21 @@ RUN cd frontend && pnpm install --frozen-lockfile
 COPY . .
 
 # ── Build ─────────────────────────────────────────────────────────────────────
-# 1. Compile TypeScript → dist/  (dist/pulse/…, dist/index.js, etc.)
+# 1. Compile TypeScript → /app/dist/
 RUN pnpm compile
 
-# 2. Build React frontend → dist/frontend/  (must come AFTER pnpm compile so
-#    dist/ already exists; Vite's emptyOutDir:true only wipes dist/frontend/).
+# 2. Create static dir and build React frontend into it.
+#    NODE_ENV=production is already set above, so vite.config.ts routes output
+#    to /app/frontend-static/ instead of ../dist/frontend.
+RUN mkdir -p /app/frontend-static
 RUN cd frontend && pnpm run build
 
-# ── Debug: verify dist/ contents after build ─────────────────────────────────
-RUN echo "=== /app/dist/ ===" && ls -la /app/dist/ && \
-    echo "=== /app/dist/frontend/ ===" && ls -la /app/dist/frontend/ || echo "dist/frontend/ NOT FOUND"
+# Verify the static files are where we expect them.
+RUN ls -la /app/frontend-static/
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
 RUN mkdir -p /app/data
 
 EXPOSE 3000
-
-ENV NODE_ENV=production
-ENV SERVER_PORT=3000
 
 CMD ["pnpm", "start"]
