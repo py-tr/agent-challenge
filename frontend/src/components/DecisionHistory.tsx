@@ -1,185 +1,253 @@
+import { TrendingUp } from "lucide-react";
 import type { DecisionsResponse, DecisionPattern, Decision } from "../api/pulseApi";
 
 interface Props {
   data: DecisionsResponse | null;
   loading: boolean;
+  compact?: boolean; // sidebar panel vs full-page view
 }
 
 const TYPE_LABEL: Record<string, string> = {
-  email_draft:         "Email Draft",
-  conflict_resolution: "Calendar Conflict",
+  email_draft:         "Email",
+  conflict_resolution: "Conflict",
   slib_reminder:       "Commitment",
   follow_up:           "Follow-up",
 };
 
-const TYPE_BADGE: Record<string, string> = {
-  email_draft:         "bg-blue-950/50 text-blue-500 border border-blue-900/50",
-  conflict_resolution: "bg-red-950/50 text-red-500 border border-red-900/50",
-  slib_reminder:       "bg-amber-950/50 text-amber-500 border border-amber-900/50",
-  follow_up:           "bg-purple-950/50 text-purple-500 border border-purple-900/50",
+const TYPE_COLOR: Record<string, string> = {
+  email_draft:         "#3b82f6",
+  conflict_resolution: "#ef4444",
+  slib_reminder:       "#f59e0b",
+  follow_up:           "#8b5cf6",
 };
 
-export function DecisionHistory({ data, loading }: Props) {
-  const decisions = data?.decisions ?? [];
-  const patterns  = data?.patterns  ?? [];
-  const total     = data?.total     ?? 0;
+const TYPE_BADGE: Record<string, string> = {
+  email_draft:         "bg-blue-50 text-blue-600 ring-1 ring-blue-200/60",
+  conflict_resolution: "bg-red-50 text-red-600 ring-1 ring-red-200/60",
+  slib_reminder:       "bg-amber-50 text-amber-600 ring-1 ring-amber-200/60",
+  follow_up:           "bg-purple-50 text-purple-600 ring-1 ring-purple-200/60",
+};
 
+// ─── Compact sidebar panel ────────────────────────────────────────────────────
+
+function CompactHistory({ decisions, loading }: { decisions: Decision[]; loading: boolean }) {
   return (
-    <aside className="flex flex-col gap-5">
-      {/* Pattern summary — shown when 10+ decisions exist */}
-      {total >= 10 && patterns.length > 0 && (
-        <PatternSummary patterns={patterns} total={total} />
-      )}
-
-      {/* History panel */}
-      <div className="overflow-hidden rounded-lg border border-slate-800/60 bg-surface-2">
-        <div className="flex items-center justify-between border-b border-slate-800/60 bg-surface-3 px-4 py-3">
-          <div className="flex items-center gap-2">
-            <div className="h-3.5 w-0.5 rounded-full bg-slate-700" />
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-500">
-              History
-            </h2>
-          </div>
-          {total > 0 && (
-            <span className="rounded bg-surface-4 px-1.5 py-0.5 text-xs text-slate-600">
-              {total} total
-            </span>
-          )}
-        </div>
-
-        {loading ? (
-          <div className="space-y-px p-2">
-            {[1, 2, 3, 4, 5].map((n) => (
-              <div
-                key={n}
-                className="h-14 animate-pulse rounded border border-slate-800/40 bg-surface-3"
-              />
-            ))}
-          </div>
-        ) : decisions.length === 0 ? (
-          <div className="px-4 py-12 text-center">
-            <div className="mx-auto mb-3 flex h-9 w-9 items-center justify-center rounded-full border border-slate-800/60 bg-surface-3">
-              <svg className="h-4 w-4 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
+    <div className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
+      {loading ? (
+        <div className="space-y-3 p-4">
+          {[1, 2, 3].map((n) => (
+            <div key={n} className="flex gap-2.5">
+              <div className="mt-1 h-3 w-3 shrink-0 animate-pulse rounded-full bg-gray-100" />
+              <div className="flex-1 space-y-1">
+                <div className="h-2.5 animate-pulse rounded bg-gray-100" />
+                <div className="h-2.5 w-2/3 animate-pulse rounded bg-gray-100" />
+              </div>
             </div>
-            <p className="text-sm font-medium text-slate-600">No decisions yet</p>
-            <p className="mt-1 text-xs text-slate-800 leading-relaxed">
-              Approve or reject items from the queue<br />to build your decision history.
-            </p>
-          </div>
-        ) : (
-          <ul
-            className="divide-y divide-slate-800/40 overflow-y-auto"
-            style={{ maxHeight: "calc(100vh - 320px)" }}
-          >
-            {decisions.map((d) => (
-              <DecisionRow key={d.id} decision={d} />
-            ))}
-          </ul>
-        )}
-      </div>
-    </aside>
+          ))}
+        </div>
+      ) : decisions.length === 0 ? (
+        <div className="px-4 py-8 text-center">
+          <p className="text-xs text-gray-400">No decisions yet</p>
+        </div>
+      ) : (
+        <div className="divide-y divide-gray-50">
+          {decisions.slice(0, 8).map((d) => (
+            <CompactRow key={d.id} decision={d} />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
-function DecisionRow({ decision: d }: { decision: Decision }) {
-  const approved    = d.decision === "approved";
-  const label       = d.title ?? `Item ${d.actionItemId.slice(0, 8)}`;
-  const typeLabel   = d.itemType ? (TYPE_LABEL[d.itemType] ?? d.itemType) : null;
-  const typeBadge   = d.itemType ? (TYPE_BADGE[d.itemType] ?? "bg-surface-3 text-slate-500 border border-slate-800/40") : "";
+function CompactRow({ decision: d }: { decision: Decision }) {
+  const approved = d.decision === "approved";
+  const label = d.title ?? `Item ${d.actionItemId.slice(0, 8)}`;
+  const typeColor = d.itemType ? (TYPE_COLOR[d.itemType] ?? "#9ca3af") : "#9ca3af";
 
   return (
-    <li className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-surface-3">
-      {/* Decision indicator dot */}
+    <div className="flex items-start gap-2.5 px-4 py-3">
+      {/* Colored dot keyed to item type */}
       <div
-        className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
-          approved ? "bg-emerald-500" : "bg-red-600"
-        }`}
+        className="mt-1 h-2 w-2 shrink-0 rounded-full"
+        style={{ backgroundColor: typeColor, opacity: approved ? 1 : 0.35 }}
       />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-medium text-gray-700">{label}</p>
+        <div className="mt-0.5 flex items-center gap-1.5">
+          <span className={`text-[10px] font-semibold ${approved ? "text-green-600" : "text-red-500"}`}>
+            {approved ? "Approved" : "Rejected"}
+          </span>
+          {d.itemType && (
+            <span className="text-[10px] text-gray-400">{TYPE_LABEL[d.itemType] ?? d.itemType}</span>
+          )}
+          <span className="ml-auto shrink-0 text-[10px] text-gray-300">{relativeTime(d.decidedAt)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-      <div className="min-w-0 flex-1 space-y-1.5">
-        {/* Title */}
-        <p className="truncate text-xs font-medium leading-snug text-slate-300">
-          {label}
-        </p>
+// ─── Full-page timeline ───────────────────────────────────────────────────────
 
-        {/* Badges row */}
-        <div className="flex flex-wrap items-center gap-1.5">
+function FullHistory({
+  decisions,
+  patterns,
+  total,
+  loading,
+}: {
+  decisions: Decision[];
+  patterns: DecisionPattern[];
+  total: number;
+  loading: boolean;
+}) {
+  return (
+    <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
+      {/* Timeline — 2/3 */}
+      <div className="lg:col-span-2">
+        <div className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
+          <div className="border-b border-gray-100 px-6 py-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-gray-900">Decision Log</h2>
+              {total > 0 && (
+                <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-500">
+                  {total} total
+                </span>
+              )}
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="space-y-4 p-6">
+              {[1, 2, 3, 4, 5].map((n) => (
+                <div key={n} className="flex gap-3">
+                  <div className="h-4 w-4 shrink-0 animate-pulse rounded-full bg-gray-100" />
+                  <div className="flex-1 space-y-1.5">
+                    <div className="h-3 animate-pulse rounded bg-gray-100" />
+                    <div className="h-3 w-1/2 animate-pulse rounded bg-gray-100" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : decisions.length === 0 ? (
+            <div className="px-6 py-16 text-center">
+              <p className="text-sm font-medium text-gray-500">No decisions recorded yet</p>
+              <p className="mt-1 text-xs text-gray-400">
+                Approve or reject items to build your history.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-y-auto px-6 py-5" style={{ maxHeight: "calc(100vh - 280px)" }}>
+              <ul className="relative space-y-0">
+                {/* Vertical connecting line */}
+                <div className="pointer-events-none absolute left-[7px] top-3 bottom-3 w-px bg-gray-100" />
+                {decisions.map((d) => (
+                  <TimelineRow key={d.id} decision={d} />
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Patterns sidebar — 1/3 */}
+      <div className="lg:col-span-1">
+        {total >= 5 && patterns.length > 0 && (
+          <PatternSummary patterns={patterns} total={total} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TimelineRow({ decision: d }: { decision: Decision }) {
+  const approved = d.decision === "approved";
+  const label = d.title ?? `Item ${d.actionItemId.slice(0, 8)}`;
+  const typeLabel = d.itemType ? (TYPE_LABEL[d.itemType] ?? d.itemType) : null;
+  const typeBadge = d.itemType ? (TYPE_BADGE[d.itemType] ?? "bg-gray-100 text-gray-500") : "";
+
+  return (
+    <li className="relative flex gap-3 pb-5 last:pb-0">
+      {/* Timeline dot */}
+      <div
+        className={`relative z-10 mt-0.5 flex h-[15px] w-[15px] shrink-0 items-center justify-center rounded-full border-2 bg-white ${
+          approved ? "border-green-500" : "border-red-400"
+        }`}
+      >
+        <span
+          className={`h-[5px] w-[5px] rounded-full ${approved ? "bg-green-500" : "bg-red-400"}`}
+        />
+      </div>
+
+      {/* Content */}
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium leading-snug text-gray-800 truncate">{label}</p>
+
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           <span
             className={`badge text-xs font-semibold ${
               approved
-                ? "bg-emerald-950/50 text-emerald-500 border border-emerald-900/50"
-                : "bg-red-950/50 text-red-500 border border-red-900/50"
+                ? "bg-green-50 text-green-700 ring-1 ring-green-200/60"
+                : "bg-red-50 text-red-600 ring-1 ring-red-200/60"
             }`}
           >
             {approved ? "Approved" : "Rejected"}
           </span>
-
           {typeLabel && (
-            <span className={`badge text-xs ${typeBadge}`}>
-              {typeLabel}
-            </span>
+            <span className={`badge text-xs ${typeBadge}`}>{typeLabel}</span>
           )}
         </div>
 
-        {/* Reason + timestamp */}
-        <div className="flex items-center justify-between gap-2">
-          {d.reason ? (
-            <p className="truncate text-xs italic text-slate-700">"{d.reason}"</p>
-          ) : (
-            <span />
-          )}
-          <p className="shrink-0 text-xs text-slate-800">{relativeTime(d.decidedAt)}</p>
-        </div>
+        {d.reason && (
+          <p className="mt-1 truncate text-xs italic text-gray-400">"{d.reason}"</p>
+        )}
+
+        <p className="mt-0.5 text-xs text-gray-400">{relativeTime(d.decidedAt)}</p>
       </div>
     </li>
   );
 }
 
-function PatternSummary({
-  patterns,
-  total,
-}: {
-  patterns: DecisionPattern[];
-  total: number;
-}) {
+// ─── Pattern summary ──────────────────────────────────────────────────────────
+
+function PatternSummary({ patterns, total }: { patterns: DecisionPattern[]; total: number }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-800/60 bg-surface-2">
-      <div className="flex items-center gap-2 border-b border-slate-800/60 bg-surface-3 px-4 py-3">
-        <div className="h-3.5 w-0.5 rounded-full bg-slate-700" />
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-500">
-          Your Patterns
-        </h2>
-        <span className="ml-auto text-xs text-slate-700">{total} decisions</span>
+    <div className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
+      <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+        <div className="flex items-center gap-2">
+          <TrendingUp size={15} className="text-indigo-400" />
+          <h2 className="text-sm font-semibold text-gray-900">Your Patterns</h2>
+        </div>
+        <span className="text-xs text-gray-400">{total} decisions</span>
       </div>
 
-      <div className="space-y-4 px-4 py-4">
+      <div className="space-y-4 px-5 py-4">
         {patterns.map((p) => {
           const approvedTotal = p.approved + p.rejected;
-          const pct =
-            approvedTotal > 0 ? Math.round((p.approved / approvedTotal) * 100) : 0;
+          const pct = approvedTotal > 0 ? Math.round((p.approved / approvedTotal) * 100) : 0;
           const label = TYPE_LABEL[p.type] ?? p.type.replace(/_/g, " ");
-          const barColor =
-            pct >= 70 ? "bg-emerald-600" : pct >= 40 ? "bg-amber-600" : "bg-red-700";
-          const pctColor =
-            pct >= 70 ? "text-emerald-500" : pct >= 40 ? "text-amber-500" : "text-red-500";
+          const typeColor = TYPE_COLOR[p.type] ?? "#9ca3af";
+          const pctColor = pct >= 70 ? "text-green-600" : pct >= 40 ? "text-amber-600" : "text-red-500";
 
           return (
             <div key={p.type}>
-              <div className="mb-1.5 flex items-center justify-between text-xs">
-                <span className="text-slate-500">{label}</span>
-                <span className={`tabular-nums font-semibold ${pctColor}`}>
-                  {pct}% approved
-                </span>
+              <div className="mb-1.5 flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <div
+                    className="h-2 w-2 rounded-full"
+                    style={{ backgroundColor: typeColor }}
+                  />
+                  <span className="text-sm text-gray-700">{label}</span>
+                </div>
+                <span className={`text-sm font-semibold tabular-nums ${pctColor}`}>{pct}%</span>
               </div>
-              <div className="h-1 overflow-hidden rounded-full bg-slate-800">
+              <div className="h-1.5 overflow-hidden rounded-full bg-gray-100">
                 <div
-                  className={`h-full rounded-full transition-all duration-700 ${barColor}`}
-                  style={{ width: `${pct}%` }}
+                  className="h-full rounded-full transition-all duration-700"
+                  style={{ width: `${pct}%`, backgroundColor: typeColor }}
                 />
               </div>
-              <p className="mt-1 text-right text-xs text-slate-800">
+              <p className="mt-1 text-right text-xs text-gray-400">
                 {p.approved} approved · {p.rejected} rejected
               </p>
             </div>
@@ -190,6 +258,20 @@ function PatternSummary({
   );
 }
 
+// ─── Main export ──────────────────────────────────────────────────────────────
+
+export function DecisionHistory({ data, loading, compact = false }: Props) {
+  const decisions = data?.decisions ?? [];
+  const patterns = data?.patterns ?? [];
+  const total = data?.total ?? 0;
+
+  if (compact) {
+    return <CompactHistory decisions={decisions} loading={loading} />;
+  }
+
+  return <FullHistory decisions={decisions} patterns={patterns} total={total} loading={loading} />;
+}
+
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const m = Math.floor(diff / 60_000);
@@ -197,6 +279,5 @@ function relativeTime(iso: string): string {
   if (diff < 60_000) return "just now";
   if (m < 60) return `${m}m ago`;
   if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  return `${d}d ago`;
+  return `${Math.floor(h / 24)}d ago`;
 }

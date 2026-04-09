@@ -7,8 +7,6 @@ interface Props {
   onRefresh: () => void;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 function timeAgo(iso: string | null): string {
   if (!iso) return "never";
   const diff = Date.now() - new Date(iso).getTime();
@@ -35,60 +33,52 @@ function shortNodeId(nodeId: string | null): string {
   return nodeId.length > 12 ? nodeId.slice(0, 8) + "…" + nodeId.slice(-4) : nodeId;
 }
 
-// ─── Nosana GPU Panel ─────────────────────────────────────────────────────────
+// ─── Nosana Badge ─────────────────────────────────────────────────────────────
 
-function NosanaPanel({ nosana }: { nosana: NosanaMetrics }) {
+function NosanaBadge({ nosana }: { nosana: NosanaMetrics }) {
   if (!nosana.isNosanaNode) {
     return (
-      <div className="flex items-center gap-2 text-xs text-slate-700">
-        <span className="h-1.5 w-1.5 rounded-full bg-slate-700" />
-        <span>local dev</span>
-        <span className="text-slate-800">·</span>
-        <span>{nosana.llmCallCount} LLM calls</span>
-        <span className="text-slate-800">·</span>
-        <span>up {formatUptime(nosana.uptimeMs)}</span>
+      <div className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5">
+        <span className="h-2 w-2 rounded-full bg-gray-300" />
+        <span className="text-xs text-gray-500">Local dev</span>
+        <span className="text-gray-300">·</span>
+        <span className="text-xs text-gray-400">{nosana.llmCallCount} LLM calls</span>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+    <div className="flex items-center gap-3">
+      {/* Prominent Nosana chip */}
       <a
         href={nosana.nodeUrl ?? undefined}
         target="_blank"
         rel="noopener noreferrer"
         title={`Nosana GPU node: ${nosana.nodeId}`}
-        className="inline-flex items-center gap-1.5 rounded border border-violet-800/70 bg-violet-950/40 px-2 py-0.5 text-violet-400 transition-colors hover:border-violet-600 hover:text-violet-300"
+        className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-1.5 transition-colors hover:bg-green-100"
       >
-        <span className="relative flex h-1.5 w-1.5">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-50" />
-          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-violet-400" />
+        {/* Pulsing green dot */}
+        <span className="relative flex h-2.5 w-2.5 shrink-0">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-60" />
+          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-500" />
         </span>
-        <span className="font-medium">Nosana GPU</span>
+        <span className="text-sm font-semibold text-green-800">Running on Nosana GPU</span>
+        <span className="font-mono text-xs text-green-600" title={nosana.nodeId ?? ""}>
+          {shortNodeId(nosana.nodeId)}
+        </span>
       </a>
 
-      <span className="font-mono text-slate-600" title={nosana.nodeId ?? ""}>
-        {shortNodeId(nosana.nodeId)}
-      </span>
-
-      <span className="hidden text-slate-800 sm:block">·</span>
-
-      <span className="hidden text-slate-500 sm:block">
-        <span className="tabular-nums text-slate-400">{nosana.llmCallCount}</span>
-        {" "}inferences
-      </span>
-
-      <span className="hidden text-slate-800 sm:block">·</span>
-
-      <span className="hidden text-slate-600 sm:block">
-        up {formatUptime(nosana.uptimeMs)}
-      </span>
-
-      <span className="hidden text-slate-800 sm:block">·</span>
-
-      <span className="hidden rounded bg-surface-3 px-1.5 py-0.5 font-mono text-slate-500 sm:block">
-        {nosana.jobType}
-      </span>
+      {/* Secondary stats */}
+      <div className="hidden items-center gap-2 text-xs text-gray-400 sm:flex">
+        <span className="tabular-nums font-medium text-gray-600">{nosana.llmCallCount}</span>
+        <span>inferences</span>
+        <span className="text-gray-300">·</span>
+        <span>up {formatUptime(nosana.uptimeMs)}</span>
+        <span className="text-gray-300">·</span>
+        <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-gray-500">
+          {nosana.jobType}
+        </span>
+      </div>
     </div>
   );
 }
@@ -102,54 +92,59 @@ export function StatusBar({ status, lastUpdated, error, onRefresh }: Props) {
   const nosana   = status?.nosana;
 
   return (
-    <header className="sticky top-0 z-10 border-b border-slate-800/60 bg-surface-1/95 backdrop-blur-sm">
-      {/* ── Main row ─────────────────────────────────────────────────────── */}
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3.5">
-        {/* Left: brand */}
-        <div className="flex items-center gap-4">
+    <header className="sticky top-0 z-10 border-b border-gray-200 bg-white shadow-sm">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-4">
+
+        {/* ── Left: brand + Nosana badge ──────────────────────────────────── */}
+        <div className="flex items-center gap-5">
           <div>
             <div className="flex items-center gap-2.5">
-              <span className="text-sm font-semibold tracking-tight text-white">
-                Pulse
-              </span>
-              <span className="rounded bg-surface-3 px-1.5 py-0.5 text-xs text-slate-500">
+              <span className="text-2xl font-bold tracking-tight text-gray-900">Pulse</span>
+              <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-500">
                 Chief of Staff
               </span>
-              <div className="flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 animate-pulse_dot rounded-full bg-emerald-500" />
-                <span className="text-xs text-emerald-600">Live</span>
-              </div>
             </div>
-            <p className="mt-0.5 text-xs text-slate-600 max-w-md leading-snug">
-              Monitors your inbox and calendar, surfaces items that need your attention,
-              and waits for your approval before acting.
+            <p className="mt-0.5 text-xs text-gray-400 leading-snug">
+              Monitors inbox and calendar · waits for your approval before acting
             </p>
           </div>
+
+          {nosana && <NosanaBadge nosana={nosana} />}
         </div>
 
-        {/* Right: queue stats + refresh */}
-        <div className="flex items-center gap-5">
-          <div className="flex items-center gap-4 text-xs">
-            <Stat
-              label="Pending"
-              value={pending}
-              highlight={pending > 0}
-            />
-            <Divider />
+        {/* ── Right: pending badge + stats + refresh ──────────────────────── */}
+        <div className="flex shrink-0 items-center gap-4">
+          {/* Large indigo pending count */}
+          <div className="flex items-center gap-2">
+            <div
+              className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold tabular-nums transition-colors ${
+                pending > 0
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "bg-gray-100 text-gray-400"
+              }`}
+            >
+              {pending}
+            </div>
+            <span className="hidden text-xs text-gray-500 sm:block">pending</span>
+          </div>
+
+          <div className="h-6 w-px bg-gray-200" />
+
+          <div className="hidden items-center gap-3 text-xs sm:flex">
             <Stat label="Approved" value={approved} />
-            <Divider />
+            <span className="text-gray-200">·</span>
             <Stat label="Rejected" value={rejected} />
           </div>
 
           {lastUpdated && (
-            <span className="hidden text-xs text-slate-700 sm:block">
+            <span className="hidden text-xs text-gray-400 lg:block">
               {timeAgo(lastUpdated.toISOString())}
             </span>
           )}
 
           <button
             onClick={onRefresh}
-            className="rounded-md border border-slate-800 p-1.5 text-slate-600 transition-colors hover:border-slate-600 hover:text-slate-300 active:scale-95"
+            className="rounded-lg border border-gray-200 p-1.5 text-gray-400 transition-colors hover:border-gray-300 hover:text-gray-600 active:scale-95"
             title="Refresh"
           >
             <RefreshIcon />
@@ -157,18 +152,8 @@ export function StatusBar({ status, lastUpdated, error, onRefresh }: Props) {
         </div>
       </div>
 
-      {/* ── Nosana GPU panel row ─────────────────────────────────────────── */}
-      {nosana && (
-        <div className="border-t border-slate-900 bg-black/10 px-6 py-1.5">
-          <div className="mx-auto max-w-7xl">
-            <NosanaPanel nosana={nosana} />
-          </div>
-        </div>
-      )}
-
-      {/* ── Error banner ─────────────────────────────────────────────────── */}
       {error && (
-        <div className="border-t border-red-900/50 bg-red-950/30 px-6 py-2 text-xs text-red-400">
+        <div className="border-t border-red-200 bg-red-50 px-6 py-2 text-xs text-red-600">
           Connection error: {error} — retrying every 5s
         </div>
       )}
@@ -176,49 +161,20 @@ export function StatusBar({ status, lastUpdated, error, onRefresh }: Props) {
   );
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-function Stat({
-  label,
-  value,
-  highlight = false,
-}: {
-  label: string;
-  value: number;
-  highlight?: boolean;
-}) {
+function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <span
-        className={`text-sm font-semibold tabular-nums ${
-          highlight ? "text-amber-400" : "text-slate-400"
-        }`}
-      >
-        {value}
-      </span>
-      <span className="text-slate-700">{label}</span>
-    </div>
+    <span className="text-gray-600">
+      <span className="font-semibold tabular-nums text-gray-800">{value}</span>
+      {" "}{label}
+    </span>
   );
-}
-
-function Divider() {
-  return <span className="h-3 w-px bg-slate-800" />;
 }
 
 function RefreshIcon() {
   return (
-    <svg
-      className="h-3.5 w-3.5"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-      />
+    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round"
+        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
     </svg>
   );
 }

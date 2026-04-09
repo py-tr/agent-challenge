@@ -28,9 +28,14 @@ export default defineConfig({
     // Docker (PULSE_DOCKER_BUILD=1):  /srv/pulse-frontend — outside /app entirely
     //   so the Nosana volume mount that covers /app cannot wipe the built assets.
     // Local (unset):                  ../dist/frontend — standard Vite output path.
+    // Docker (PULSE_DOCKER_BUILD=1): /srv/pulse-frontend — outside /app so
+    // the Nosana volume mount cannot wipe built assets.
+    // Local: ../dist-frontend — deliberately NOT inside ../dist/ because
+    // elizaos dev wipes the TypeScript outDir (dist/) on startup, which
+    // would delete dist/frontend/ right after predev builds it.
     outDir: process.env.PULSE_DOCKER_BUILD
       ? "/srv/pulse-frontend"
-      : "../dist/frontend",
+      : "../dist-frontend",
     emptyOutDir: true,
   },
 });

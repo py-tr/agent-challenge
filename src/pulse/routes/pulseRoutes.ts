@@ -45,12 +45,12 @@ import { CalendarMcpService } from "../services/CalendarMcpService.js";
 // ─── Frontend static-file serving ────────────────────────────────────────────
 
 // In Docker the frontend is built to /srv/pulse-frontend/ (outside /app so
-// the Nosana volume mount doesn't wipe it). Locally the Vite outDir is
-// ../dist/frontend. Detect by filesystem presence rather than NODE_ENV so
-// the backend always serves the right directory regardless of how it's started.
+// the Nosana volume mount doesn't wipe it).
+// Locally Vite writes to dist-frontend/ (project root) — NOT dist/frontend/
+// because elizaos dev wipes the TypeScript outDir (dist/) on startup.
 const FRONTEND_DIR = existsSync("/srv/pulse-frontend")
   ? "/srv/pulse-frontend"
-  : resolve(dirname(fileURLToPath(import.meta.url)), "../../../dist/frontend");
+  : resolve(dirname(fileURLToPath(import.meta.url)), "../../../dist-frontend");
 
 /** Content-Type mapping for files emitted by Vite. */
 const MIME: Record<string, string> = {

@@ -5,31 +5,30 @@ export default {
     extend: {
       colors: {
         surface: {
-          0: "#08080f",
-          1: "#0f0f1a",
-          2: "#14141f",
-          3: "#1a1a28",
-          4: "#20202f",
+          0: "#f8f9fa", // page background
+          1: "#ffffff", // header / card background
+          2: "#ffffff", // card background
+          3: "#f9fafb", // subtle section / hover background
+          4: "#f3f4f6", // tag / counter background
         },
       },
+      boxShadow: {
+        card: "0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.04)",
+        "card-hover": "0 4px 12px 0 rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.05)",
+      },
       keyframes: {
-        "fade-out": {
-          "0%": { opacity: "1", transform: "scale(1)" },
-          "100%": { opacity: "0", transform: "scale(0.97)" },
-        },
         "slide-in": {
-          "0%": { opacity: "0", transform: "translateY(-8px)" },
+          "0%":   { opacity: "0", transform: "translateY(-6px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
         pulse_dot: {
           "0%, 100%": { opacity: "1" },
-          "50%": { opacity: "0.3" },
+          "50%":      { opacity: "0.4" },
         },
       },
       animation: {
-        "fade-out": "fade-out 0.3s ease-out forwards",
-        "slide-in": "slide-in 0.25s ease-out forwards",
-        pulse_dot: "pulse_dot 2s ease-in-out infinite",
+        "slide-in": "slide-in 0.2s ease-out forwards",
+        pulse_dot:  "pulse_dot 2s ease-in-out infinite",
       },
     },
   },

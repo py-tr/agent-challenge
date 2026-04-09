@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Check, X, ChevronDown, ChevronUp, CheckCircle2 } from "lucide-react";
 import type { ActionItem, ActionItemType } from "../api/pulseApi";
 import { SlibGuardAlert } from "./SlibGuardAlert";
 
@@ -13,38 +14,138 @@ interface Props {
 
 const TYPE_META: Record<
   ActionItemType,
-  {
-    label: string;
-    cta: string;
-    accentClass: string;
-    badgeClass: string;
-  }
+  { label: string; cta: string; borderColor: string; badgeClass: string; filterLabel: string }
 > = {
   email_draft: {
     label: "Email Draft",
     cta: "Review this draft before sending",
-    accentClass: "border-l-blue-700",
-    badgeClass: "bg-blue-950/60 text-blue-400 border border-blue-800/40",
+    borderColor: "#3b82f6",
+    badgeClass: "bg-blue-50 text-blue-700 ring-1 ring-blue-200/60",
+    filterLabel: "Email",
   },
   conflict_resolution: {
     label: "Calendar Conflict",
     cta: "Reschedule needed",
-    accentClass: "border-l-red-700",
-    badgeClass: "bg-red-950/60 text-red-400 border border-red-800/40",
+    borderColor: "#ef4444",
+    badgeClass: "bg-red-50 text-red-700 ring-1 ring-red-200/60",
+    filterLabel: "Conflict",
   },
   slib_reminder: {
     label: "Commitment",
     cta: "You made a commitment — approve to confirm it's handled",
-    accentClass: "border-l-amber-600",
-    badgeClass: "bg-amber-950/60 text-amber-400 border border-amber-800/40",
+    borderColor: "#f59e0b",
+    badgeClass: "bg-amber-50 text-amber-700 ring-1 ring-amber-200/60",
+    filterLabel: "Commitment",
   },
   follow_up: {
     label: "Follow-up",
     cta: "No reply received — approve to follow up",
-    accentClass: "border-l-purple-700",
-    badgeClass: "bg-purple-950/60 text-purple-400 border border-purple-800/40",
+    borderColor: "#8b5cf6",
+    badgeClass: "bg-purple-50 text-purple-700 ring-1 ring-purple-200/60",
+    filterLabel: "Follow-up",
   },
 };
+
+type FilterType = ActionItemType | "all";
+
+// ─── Filter pills ─────────────────────────────────────────────────────────────
+
+function FilterPills({
+  items,
+  active,
+  onChange,
+}: {
+  items: ActionItem[];
+  active: FilterType;
+  onChange: (f: FilterType) => void;
+}) {
+  const types = (Object.keys(TYPE_META) as ActionItemType[]).filter((t) =>
+    items.some((i) => i.type === t)
+  );
+
+  if (types.length <= 1) return null;
+
+  return (
+    <div className="mb-5 flex flex-wrap gap-2">
+      <FilterPill label="All" count={items.length} active={active === "all"} onClick={() => onChange("all")} />
+      {types.map((t) => {
+        const meta = TYPE_META[t];
+        const count = items.filter((i) => i.type === t).length;
+        return (
+          <FilterPill
+            key={t}
+            label={meta.filterLabel}
+            count={count}
+            active={active === t}
+            onClick={() => onChange(t)}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function FilterPill({
+  label,
+  count,
+  active,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+        active
+          ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+          : "border-gray-200 bg-white text-gray-500 hover:border-gray-300 hover:text-gray-700"
+      }`}
+    >
+      {label}
+      <span
+        className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${
+          active ? "bg-indigo-100 text-indigo-600" : "bg-gray-100 text-gray-500"
+        }`}
+      >
+        {count}
+      </span>
+    </button>
+  );
+}
+
+// ─── Markdown body renderer ───────────────────────────────────────────────────
+
+function BodyRenderer({ text }: { text: string }) {
+  const parts = text.split(/\n\n+/);
+  return (
+    <div className="space-y-2">
+      {parts.map((para, i) => {
+        if (para.startsWith("> ")) {
+          const inner = para.slice(2).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+          return (
+            <blockquote
+              key={i}
+              className="border-l-[3px] border-gray-200 pl-3 text-sm italic text-gray-500 leading-relaxed"
+              dangerouslySetInnerHTML={{ __html: inner }}
+            />
+          );
+        }
+        const html = para.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+        return (
+          <p
+            key={i}
+            className="text-sm leading-relaxed text-gray-600"
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
+        );
+      })}
+    </div>
+  );
+}
 
 // ─── Item card ────────────────────────────────────────────────────────────────
 
@@ -70,6 +171,7 @@ function ItemCard({
     } finally {
       setBusy(false);
       setShowRejectInput(false);
+      setRejectReason("");
     }
   }
 
@@ -77,53 +179,68 @@ function ItemCard({
     .split("\n")
     .find((l) => l.trim().length > 0 && !l.startsWith("#"))
     ?.replace(/\*\*(.+?)\*\*/g, "$1")
-    .slice(0, 140);
+    .slice(0, 180);
 
   return (
     <article
-      className={`animate-slide-in overflow-hidden rounded-lg border border-slate-800/60 border-l-2 bg-surface-2 transition-colors hover:bg-surface-3 ${meta.accentClass}`}
+      className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm transition-shadow hover:shadow-md"
+      style={{ borderLeft: `4px solid ${meta.borderColor}` }}
     >
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3 px-4 pt-4 pb-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`badge text-xs ${meta.badgeClass}`}>{meta.label}</span>
-            <span className="badge bg-surface-3 text-slate-600 border border-slate-800/40 text-xs">
-              Priority {item.priority}
-            </span>
+      {/* Card body */}
+      <div className="p-5">
+        {/* Top row: badges left, timestamp + expand right */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className={`badge ${meta.badgeClass}`}>{meta.label}</span>
+            {item.priority <= 2 && (
+              <span
+                className={`badge text-xs font-semibold ${
+                  item.priority === 1
+                    ? "bg-red-50 text-red-600 ring-1 ring-red-200/60"
+                    : "bg-amber-50 text-amber-600 ring-1 ring-amber-200/60"
+                }`}
+              >
+                P{item.priority}
+              </span>
+            )}
           </div>
-          <h3 className="mt-2 text-sm font-semibold leading-snug text-slate-100">
-            {item.title}
-          </h3>
-          <p className="mt-1 text-xs text-slate-600 font-medium">{meta.cta}</p>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="text-xs text-gray-400">{relativeTime(item.createdAt)}</span>
+            <button
+              onClick={() => setExpanded((v) => !v)}
+              className="rounded-md p-1 text-gray-300 hover:bg-gray-100 hover:text-gray-500 transition-colors"
+              title={expanded ? "Collapse" : "Expand"}
+            >
+              {expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+            </button>
+          </div>
         </div>
-        <button
-          onClick={() => setExpanded((v) => !v)}
-          className="mt-0.5 shrink-0 rounded p-1 text-slate-700 hover:text-slate-400 transition-colors"
-          title={expanded ? "Collapse" : "Expand"}
-        >
-          <ChevronIcon rotated={expanded} />
-        </button>
-      </div>
 
-      {/* Preview or expanded body */}
-      <div className="px-4 pb-3">
+        {/* Title */}
+        <h3 className="mt-3 text-base font-semibold leading-snug text-gray-900">{item.title}</h3>
+
+        {/* CTA */}
+        <p className="mt-1 text-xs italic text-gray-400">{meta.cta}</p>
+
+        {/* Body */}
         {expanded ? (
-          <BodyRenderer text={item.body} />
+          <div className="mt-3">
+            <BodyRenderer text={item.body} />
+          </div>
         ) : (
           preview && (
-            <p className="line-clamp-2 text-xs text-slate-500 leading-relaxed">{preview}</p>
+            <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-gray-500">{preview}</p>
           )
         )}
       </div>
 
       {/* Reject reason input */}
       {showRejectInput && (
-        <div className="px-4 pb-3">
+        <div className="border-t border-gray-100 px-5 py-3">
           <input
             autoFocus
             type="text"
-            placeholder="Reason for rejection (optional)"
+            placeholder="Reason for rejection (optional — press Enter to confirm)"
             value={rejectReason}
             onChange={(e) => setRejectReason(e.target.value)}
             onKeyDown={(e) => {
@@ -134,88 +251,79 @@ function ItemCard({
                 setRejectReason("");
               }
             }}
-            className="w-full rounded-md border border-slate-700 bg-surface-1 px-3 py-1.5 text-sm text-slate-200 placeholder-slate-700 focus:border-slate-500 focus:outline-none"
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
           />
         </div>
       )}
 
-      {/* Actions */}
-      <div className="flex items-center justify-between border-t border-slate-800/50 px-4 py-2.5">
-        <span className="text-xs text-slate-700">
-          {relativeTime(item.createdAt)}
-        </span>
-        <div className="flex gap-2">
-          {!showRejectInput ? (
-            <>
-              <button
-                onClick={() => setShowRejectInput(true)}
-                disabled={busy}
-                className="btn-reject text-xs"
-              >
-                Reject
-              </button>
-              <button
-                onClick={() => handle(onApprove)}
-                disabled={busy}
-                className="btn-approve text-xs"
-              >
-                {busy ? "…" : "Approve"}
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                onClick={() => {
-                  setShowRejectInput(false);
-                  setRejectReason("");
-                }}
-                className="btn border border-slate-800 text-xs text-slate-600 hover:text-slate-400"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() =>
-                  void handle(() => onReject(rejectReason || undefined) as Promise<void>)
-                }
-                disabled={busy}
-                className="btn border border-red-900/60 bg-red-950/40 text-xs text-red-400 hover:bg-red-950/70"
-              >
-                {busy ? "…" : "Confirm Reject"}
-              </button>
-            </>
-          )}
-        </div>
+      {/* Action bar */}
+      <div className="flex items-center justify-end gap-2 border-t border-gray-100 bg-gray-50/60 px-5 py-3">
+        {!showRejectInput ? (
+          <>
+            <button
+              onClick={() => setShowRejectInput(true)}
+              disabled={busy}
+              className="btn-reject py-1.5 px-3.5 text-xs"
+            >
+              <X size={13} />
+              Reject
+            </button>
+            <button
+              onClick={() => handle(onApprove)}
+              disabled={busy}
+              className="btn-approve py-1.5 px-3.5 text-xs"
+            >
+              {busy ? (
+                "…"
+              ) : (
+                <>
+                  <Check size={13} />
+                  Approve
+                </>
+              )}
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={() => {
+                setShowRejectInput(false);
+                setRejectReason("");
+              }}
+              className="btn border border-gray-200 bg-white py-1.5 px-3.5 text-xs text-gray-500 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() =>
+                void handle(() => onReject(rejectReason || undefined) as Promise<void>)
+              }
+              disabled={busy}
+              className="btn bg-red-600 py-1.5 px-3.5 text-xs text-white hover:bg-red-700 active:scale-[0.97]"
+            >
+              {busy ? "…" : "Confirm Reject"}
+            </button>
+          </>
+        )}
       </div>
     </article>
   );
 }
 
-// ─── Markdown body renderer ───────────────────────────────────────────────────
+// ─── Empty state ──────────────────────────────────────────────────────────────
 
-function BodyRenderer({ text }: { text: string }) {
-  const parts = text.split(/\n\n+/);
+function EmptyState() {
   return (
-    <div className="space-y-2 pt-1">
-      {parts.map((para, i) => {
-        if (para.startsWith("> ")) {
-          const inner = para.slice(2).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-          return (
-            <blockquote
-              key={i}
-              className="border-l-2 border-slate-700 pl-3 text-xs italic text-slate-400"
-              dangerouslySetInnerHTML={{ __html: inner }}
-            />
-          );
-        }
-        const html = para.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-        return (
-          <p
-            key={i}
-            className="text-xs leading-relaxed text-slate-400"
-            dangerouslySetInnerHTML={{ __html: html }}
-          />
-        );
-      })}
+    <div className="flex flex-col items-center justify-center rounded-xl border border-gray-100 bg-white px-8 py-24 text-center shadow-sm">
+      <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-green-50">
+        <CheckCircle2 size={32} className="text-green-500" />
+      </div>
+      <h3 className="text-lg font-semibold text-gray-900">You're all caught up</h3>
+      <p className="mt-2 max-w-xs text-sm leading-relaxed text-gray-500">
+        Pulse will notify you when new items need your attention. Calendar conflicts, email
+        drafts, and commitment reminders will appear here.
+      </p>
+      <p className="mt-4 text-xs text-gray-400">Nothing is sent or acted on without your approval</p>
     </div>
   );
 }
@@ -223,60 +331,54 @@ function BodyRenderer({ text }: { text: string }) {
 // ─── Action Queue ─────────────────────────────────────────────────────────────
 
 export function ActionQueue({ items, loading, onApprove, onReject }: Props) {
+  const [filter, setFilter] = useState<FilterType>("all");
+
   if (loading) {
     return (
       <div className="space-y-4">
         {[1, 2, 3].map((n) => (
           <div
             key={n}
-            className="h-32 animate-pulse rounded-lg border border-slate-800/50 bg-surface-2"
+            className="h-44 animate-pulse rounded-xl border border-gray-100 bg-white shadow-sm"
           />
         ))}
       </div>
     );
   }
 
-  if (items.length === 0) {
-    return (
-      <div className="rounded-lg border border-dashed border-slate-800/60 py-14 px-8 text-center">
-        <div className="mx-auto mb-4 h-8 w-8 rounded-full border border-slate-800 bg-surface-3 flex items-center justify-center">
-          <svg className="h-4 w-4 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        </div>
-        <p className="text-sm font-medium text-slate-500">Queue is clear</p>
-        <p className="mt-2 text-xs text-slate-700 max-w-xs mx-auto leading-relaxed">
-          Pulse scans your inbox and calendar every 6 hours. When something
-          needs your attention, it will appear here for your approval.
-        </p>
-        <div className="mt-5 flex flex-col gap-1.5 items-center text-xs text-slate-800">
-          <span>1. Pulse detects an email, conflict, or commitment</span>
-          <span>2. The item appears here for your review</span>
-          <span>3. You approve or reject — nothing is sent automatically</span>
-        </div>
-      </div>
-    );
-  }
+  if (items.length === 0) return <EmptyState />;
+
+  const filtered = filter === "all" ? items : items.filter((i) => i.type === filter);
 
   return (
-    <div className="space-y-4">
-      {items.map((item) =>
-        item.type === "slib_reminder" ? (
-          <SlibGuardAlert
-            key={item.id}
-            item={item}
-            onApprove={() => onApprove(item.id)}
-            onReject={(reason) => onReject(item.id, reason)}
-          />
-        ) : (
-          <ItemCard
-            key={item.id}
-            item={item}
-            onApprove={() => onApprove(item.id)}
-            onReject={(reason) => onReject(item.id, reason)}
-          />
-        )
-      )}
+    <div>
+      <FilterPills items={items} active={filter} onChange={setFilter} />
+
+      <div className="space-y-4">
+        {filtered.map((item) =>
+          item.type === "slib_reminder" ? (
+            <SlibGuardAlert
+              key={item.id}
+              item={item}
+              onApprove={() => onApprove(item.id)}
+              onReject={(reason) => onReject(item.id, reason)}
+            />
+          ) : (
+            <ItemCard
+              key={item.id}
+              item={item}
+              onApprove={() => onApprove(item.id)}
+              onReject={(reason) => onReject(item.id, reason)}
+            />
+          )
+        )}
+
+        {filtered.length === 0 && filter !== "all" && (
+          <p className="py-6 text-center text-sm text-gray-400">
+            No {TYPE_META[filter as ActionItemType]?.filterLabel.toLowerCase()} items pending
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -289,18 +391,4 @@ function relativeTime(iso: string): string {
   if (diff < 60_000) return "just now";
   if (m < 60) return `${m}m ago`;
   return `${Math.floor(m / 60)}h ago`;
-}
-
-function ChevronIcon({ rotated }: { rotated: boolean }) {
-  return (
-    <svg
-      className={`h-4 w-4 transition-transform ${rotated ? "rotate-180" : ""}`}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-    </svg>
-  );
 }

@@ -1,9 +1,10 @@
 /**
- * SlibGuardAlert — highlighted card for commitment reminders.
+ * SlibGuardAlert — commitment reminder card.
  * Rendered by ActionQueue when item.type === "slib_reminder".
  */
 
 import { useState } from "react";
+import { Check, X } from "lucide-react";
 import type { ActionItem } from "../api/pulseApi";
 
 interface Props {
@@ -20,7 +21,7 @@ function renderBody(text: string) {
       return (
         <blockquote
           key={i}
-          className="my-2 border-l-2 border-amber-700/60 pl-3 text-xs italic text-slate-400"
+          className="border-l-[3px] border-amber-300 pl-3 text-sm italic text-gray-600 leading-relaxed"
           dangerouslySetInnerHTML={{ __html: inner }}
         />
       );
@@ -29,7 +30,7 @@ function renderBody(text: string) {
     return (
       <p
         key={i}
-        className="text-xs leading-relaxed text-slate-400"
+        className="text-sm leading-relaxed text-gray-600"
         dangerouslySetInnerHTML={{ __html: html }}
       />
     );
@@ -54,51 +55,72 @@ export function SlibGuardAlert({ item, onApprove, onReject }: Props) {
   }
 
   return (
-    <article className="animate-slide-in overflow-hidden rounded-lg border border-l-2 border-amber-800/50 border-l-amber-600 bg-surface-2">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-amber-900/30 bg-amber-950/20 px-4 py-2.5">
-        <div className="flex items-center gap-2.5">
-          <span className="badge bg-amber-950/60 text-amber-400 border border-amber-800/40 text-xs">
-            Commitment
-          </span>
-          <span className="text-xs text-amber-500/80">
-            You made a commitment — approve to confirm it's handled
-          </span>
+    <article
+      className="overflow-hidden rounded-xl border border-amber-200 bg-amber-50 shadow-sm transition-shadow hover:shadow-md"
+      style={{ borderLeft: "4px solid #f59e0b" }}
+    >
+      {/* Card body */}
+      <div className="p-5">
+        {/* Top row */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="badge bg-amber-100 text-amber-700 ring-1 ring-amber-200/60 uppercase tracking-wide text-[10px] font-bold">
+              Commitment Reminder
+            </span>
+            {item.priority <= 2 && (
+              <span
+                className={`badge text-xs font-semibold ${
+                  item.priority === 1
+                    ? "bg-red-50 text-red-600 ring-1 ring-red-200/60"
+                    : "bg-amber-100 text-amber-600 ring-1 ring-amber-200/60"
+                }`}
+              >
+                P{item.priority}
+              </span>
+            )}
+            {meta?.deadline && (
+              <span className="rounded-full border border-amber-200 bg-white px-2.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                Due {formatDeadline(meta.deadline)}
+              </span>
+            )}
+          </div>
+          <span className="shrink-0 text-xs text-amber-600/70">{relativeTime(item.createdAt)}</span>
         </div>
-        {meta?.deadline && (
-          <span className="shrink-0 rounded bg-amber-950/60 border border-amber-800/40 px-2 py-0.5 text-xs text-amber-500">
-            Due {formatDeadline(meta.deadline)}
-          </span>
-        )}
+
+        {/* Title */}
+        <h3 className="mt-3 text-base font-semibold leading-snug text-gray-900">{item.title}</h3>
+        <p className="mt-1 text-xs italic text-amber-600">
+          You made a commitment — approve to confirm it's handled
+        </p>
+
+        {/* Body */}
+        <div className="mt-3 space-y-2">{renderBody(item.body)}</div>
       </div>
 
-      {/* Body */}
-      <div className="space-y-2 px-4 py-4">
-        <h3 className="text-sm font-semibold text-slate-100">{item.title}</h3>
-        <div className="space-y-1">{renderBody(item.body)}</div>
-      </div>
-
-      {/* Actions */}
-      <div className="flex items-center justify-between border-t border-slate-800/50 px-4 py-2.5">
-        <span className="text-xs text-slate-700">
-          Detected {relativeTime(item.createdAt)}
-        </span>
-        <div className="flex gap-2">
-          <button
-            onClick={() => handle(onReject)}
-            disabled={busy}
-            className="btn border border-slate-800 text-xs text-slate-600 hover:border-slate-700 hover:text-slate-400 disabled:opacity-40"
-          >
-            Dismiss
-          </button>
-          <button
-            onClick={() => handle(onApprove)}
-            disabled={busy}
-            className="btn bg-amber-700 text-xs text-white hover:bg-amber-600 active:scale-95 disabled:opacity-40"
-          >
-            {busy ? "…" : "Mark Handled"}
-          </button>
-        </div>
+      {/* Action bar */}
+      <div className="flex items-center justify-end gap-2 border-t border-amber-100 bg-amber-100/40 px-5 py-3">
+        <button
+          onClick={() => handle(onReject)}
+          disabled={busy}
+          className="btn border border-amber-200 bg-white py-1.5 px-3.5 text-xs text-amber-700 hover:border-amber-300 hover:bg-amber-50 disabled:opacity-50"
+        >
+          <X size={13} />
+          Dismiss
+        </button>
+        <button
+          onClick={() => handle(onApprove)}
+          disabled={busy}
+          className="btn bg-amber-500 py-1.5 px-3.5 text-xs text-white hover:bg-amber-600 active:scale-[0.97] disabled:opacity-50 shadow-sm"
+        >
+          {busy ? (
+            "…"
+          ) : (
+            <>
+              <Check size={13} />
+              Mark Handled
+            </>
+          )}
+        </button>
       </div>
     </article>
   );
