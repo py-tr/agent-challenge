@@ -1,331 +1,176 @@
 # Pulse — Autonomous Chief of Staff
 
-> Your AI that runs on your GPU, reads your inbox, guards your commitments, and never acts without your approval.
+> Reads your inbox. Guards your commitments. Runs on Nosana GPU. Nothing leaves without your approval.
 
 ![ElizaOS](./assets/NosanaXEliza.jpg)
 
-**Built for the [Nosana × ElizaOS Agent Challenge 2026](https://superteam.fun/earn/listing/nosana-builders-elizaos-challenge/) · Deadline April 14, 2026**
+**[Nosana × ElizaOS Agent Challenge 2026](https://superteam.fun/earn/listing/nosana-builders-elizaos-challenge/) · Branch: `elizaos-challenge` · Docker: `pytrdev/pulse-agent:latest`**
 
 ---
 
-## What Pulse Does
+## The Problem
 
-Pulse is a proactive personal AI that runs on Nosana's decentralized GPU network. Every morning at 6am and every evening at 9pm, it wakes up on a Nosana GPU node, reads your Gmail and Google Calendar via MCP, and builds an **Action Queue** — a prioritized list of things that need your attention today.
+Email is where good intentions go to die. You write "I'll have this to you by Friday" — and Friday arrives without a trace. You accept two meetings at the same time without noticing. Important threads get buried under newsletters.
 
-You open the dashboard. You approve or reject with one click. Nothing is ever sent or changed automatically.
+Pulse runs on a Nosana GPU node, processes your Gmail and Google Calendar on a schedule, and builds a prioritized action queue. You open the dashboard and make decisions with one click. Nothing is auto-sent — that's a feature, not a limitation.
 
-**Core capabilities:**
+---
 
-| Feature | Description |
+## What Makes Pulse Different
+
+| Feature | What it does |
 |---------|-------------|
-| **Email Triage** | Reads Gmail via MCP. Classifies each email: action-required, FYI, commitment, or noise. Drafts replies for action items. |
-| **Slib Guard** | Scans every outgoing message for commitment phrases ("I'll send X by Friday"). Creates a reminder 24h before the deadline. |
-| **Conflict Detection** | Finds overlapping calendar events. Proposes a resolution — reschedule one, decline one. You pick. |
-| **Decision Memory** | Every approve/reject is stored in PGLite. After 10+ decisions, Pulse shows your patterns ("You approve 87% of email drafts, reject 60% of reschedule suggestions"). |
-| **Action Queue** | All proposed actions wait in a queue. One click approves. Nothing auto-executes. You stay in control. |
+| **Slib Guard** | Scans every outgoing message for commitment language — *"I'll send this by Friday"*, *"Let's sync next week"*. Creates a reminder 24h before the deadline. You promised it; Pulse remembers it. |
+| **Decision Memory** | Every approve/reject is stored. After 10+ decisions, Pulse surfaces your patterns: *"You approve 87% of email drafts, reject 60% of reschedule suggestions."* |
+| **Approval Queue** | Every proposed action sits in queue until you explicitly approve it. Email drafts, calendar reschedules, follow-up reminders — nothing executes automatically. |
+| **Calendar Conflict Detection** | Finds overlapping events. Proposes a resolution. You pick which one moves. |
+| **Real-Time Web Search** | `WebSearchProvider` injects live weather and factual data into LLM context *before* generation — no hallucination, no fabricated forecasts. Routes weather to wttr.in, general queries to DuckDuckGo. |
+| **Morning Briefing** | On startup, Pulse posts a prioritized briefing of pending queue items to the chat. P1 first, everything else ranked below. |
 
 ---
 
-## Architecture
+## ElizaOS Integration
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Nosana GPU Node                       │
-│                                                          │
-│  ┌─────────────────────────────────────────────────┐    │
-│  │              ElizaOS Runtime                     │    │
-│  │                                                  │    │
-│  │  ┌──────────────────┐  ┌──────────────────────┐  │    │
-│  │  │ PulseBackground  │  │   GmailMcpService    │  │    │
-│  │  │ Service          │  │   (30-min heartbeat) │  │    │
-│  │  │ (6am / 9pm run)  │  └──────────────────────┘  │    │
-│  │  └──────────────────┘  ┌──────────────────────┐  │    │
-│  │                        │  CalendarMcpService   │  │    │
-│  │  ┌──────────────────┐  └──────────────────────┘  │    │
-│  │  │  SlibGuard       │                            │    │
-│  │  │  Evaluator       │  ┌──────────────────────┐  │    │
-│  │  │  (alwaysRun)     │  │      PGLite DB        │  │    │
-│  │  └──────────────────┘  │  action_items         │  │    │
-│  │                        │  commitments           │  │    │
-│  │  ┌──────────────────┐  │  decisions            │  │    │
-│  │  │  HTTP Routes     │  └──────────────────────┘  │    │
-│  │  │  /pulse/queue    │                            │    │
-│  │  │  /pulse/approve  │                            │    │
-│  │  │  /pulse/reject   │                            │    │
-│  │  └──────────────────┘                            │    │
-│  └─────────────────────────────────────────────────┘    │
-│                          │                               │
-│              Port 3000 exposed                           │
-└──────────────────────────┼──────────────────────────────┘
-                           │
-                    ┌──────▼──────┐
-                    │  React +    │
-                    │  Vite UI    │
-                    │  localhost  │
-                    │  :5173      │
-                    └─────────────┘
-```
-
-### Data Flow
-
-```
-Nosana Job Triggers (6am / 9pm)
-        │
-        ▼
-PulseBackgroundService.processEmailsAndCalendar()
-        │
-        ├─── GmailMcpService.getEmails()
-        │         │
-        │         ▼
-        │    emailClassifier (LLM)
-        │         │
-        │         ▼
-        │    action_items table (status: pending)
-        │
-        ├─── CalendarMcpService.getEvents()
-        │         │
-        │         ▼
-        │    conflictDetector (LLM)
-        │         │
-        │         ▼
-        │    action_items table (type: conflict_resolution)
-        │
-        └─── commitmentParser.getPendingReminders()
-                  │
-                  ▼
-             action_items table (type: commitment_reminder)
-
-User opens dashboard
-        │
-        ▼
-GET /pulse/queue → ActionQueue component
-        │
-        ▼
-User clicks Approve / Reject
-        │
-        ▼
-POST /pulse/approve/:id → decisions table
-        │
-        ▼
-Queue refreshes (optimistic update)
-```
-
----
-
-## Plugin Structure
+Pulse uses every major ElizaOS abstraction — this is a full plugin implementation, not a wrapper.
 
 ```
 src/pulse/
-├── index.ts                      # Plugin barrel — assembles all pieces
-├── types.ts                      # Shared TS interfaces
-│
+├── index.ts                        # Plugin barrel: assembles all pieces + custom model handler
 ├── services/
-│   ├── PulseBackgroundService.ts # Core Service: 6am/9pm processing loop
-│   ├── GmailMcpService.ts        # Gmail MCP client + token refresh heartbeat
-│   └── CalendarMcpService.ts     # Google Calendar MCP client
-│
+│   ├── PulseBackgroundService.ts   # Service: 6-hour processing loop (Gmail + Calendar)
+│   ├── GmailMcpService.ts          # Service: MCP client + 30-min token refresh heartbeat
+│   ├── CalendarMcpService.ts       # Service: Calendar MCP wrapper with response caching
+│   └── MorningBriefingService.ts   # Service: startup briefing posted to chat
 ├── evaluators/
-│   └── SlibGuardEvaluator.ts     # alwaysRun: scans messages for commitments
-│
+│   └── SlibGuardEvaluator.ts       # Evaluator (alwaysRun: true): scans every message
 ├── providers/
-│   ├── ActionQueueProvider.ts    # Injects queue summary into LLM context
-│   └── DecisionHistoryProvider.ts # Last 10 decisions + pattern analysis
-│
+│   ├── ActionQueueProvider.ts      # Provider: injects pending queue into every LLM prompt
+│   ├── DecisionHistoryProvider.ts  # Provider: last 10 decisions + approval-rate patterns
+│   └── WebSearchProvider.ts        # Provider: real-time web data injection before generation
 ├── actions/
-│   ├── ApproveItemAction.ts      # Approve queued item by ID
-│   ├── RejectItemAction.ts       # Reject item + persist reason
-│   ├── ProcessEmailsAction.ts    # Manually trigger email processing
-│   └── DetectConflictsAction.ts  # Manually trigger calendar scan
-│
+│   ├── ProcessEmailsAction.ts      # Action: manually trigger Gmail processing
+│   ├── DetectConflictsAction.ts    # Action: manually trigger calendar scan
+│   └── WebSearchAction.ts          # Action: DuckDuckGo + wttr.in, no API key required
 ├── routes/
-│   └── pulseRoutes.ts            # REST API: queue, approve, reject, decisions, status
-│
-├── db/
-│   ├── schema.ts                 # Drizzle ORM table definitions (PGLite)
-│   ├── migrations.ts             # Migration runner (IF NOT EXISTS DDL)
-│   └── queries.ts                # Typed CRUD helpers — no raw SQL
-│
-├── lib/
-│   ├── gmailClient.ts            # MCP-first, googleapis fallback
-│   ├── calendarClient.ts         # Calendar MCP wrapper
-│   ├── commitmentParser.ts       # Extract "I'll send X by Friday" patterns
-│   ├── conflictDetector.ts       # Find overlapping events, propose resolution
-│   └── emailClassifier.ts        # LLM email categorization
-│
-└── tests/
-    ├── helpers.ts                # In-memory PGLite + mock runtime
-    ├── slibGuard.test.ts         # 18 tests: commitment extraction + timing
-    ├── actionQueue.test.ts       # 8 tests: approve/reject + persistence
-    ├── emailClassifier.test.ts   # 6 tests: categorization accuracy
-    ├── conflictDetector.test.ts  # 7 tests: overlap detection
-    ├── providers.test.ts         # 6 tests: provider output format
-    └── persistence.test.ts       # 2 tests: DB migrations + CRUD
+│   └── pulseRoutes.ts              # Routes: REST API (/pulse/queue, approve, reject, status)
+└── db/
+    ├── schema.ts                   # Drizzle ORM table definitions (PGLite)
+    ├── migrations.ts               # IF NOT EXISTS migrations — safe on cold Nosana boot
+    └── queries.ts                  # Typed CRUD — no raw SQL anywhere
 ```
+
+**Plugin registration highlights:**
+
+- **4 Services** — background processing, MCP clients, morning briefing
+- **3 Providers** — queue state, decision history, and live web data injected into every prompt
+- **1 Evaluator** — `alwaysRun: true`, fires on every message to detect commitment language
+- **3 Actions** — email processing, conflict detection, web search
+- **REST Routes** — full CRUD API for the React dashboard
+- **Custom model handler** — `priority: 1` overrides `plugin-openai` to POST directly to `/v1/chat/completions`, bypassing `@ai-sdk/openai`'s Responses API default (which Nosana nodes don't support)
 
 ---
 
 ## Nosana Integration
 
-Pulse uses **two Nosana job definitions** to schedule processing runs:
+### Custom Chat Completions Handler
 
-| Job | Schedule | File |
-|-----|----------|------|
-| Morning run | 6:00 AM | `nos_job_def/nosana_morning_job.json` |
-| Evening run  | 9:00 PM | `nos_job_def/nosana_evening_job.json` |
+`plugin-openai` v2 routes all inference through `/v1/responses` — a newer API endpoint that Nosana's GPU nodes don't expose. Pulse registers its own `TEXT_SMALL` and `TEXT_LARGE` model handlers at `priority: 1`, which POST directly to `/v1/chat/completions`:
 
-Both use the same Docker image (`pytrdev/pulse-agent:latest`). The `PULSE_JOB_TYPE` environment variable tells the container which processing mode to run.
-
-**Why Nosana?** Pulse's background jobs are compute-intensive — LLM calls for email classification, conflict resolution, and commitment extraction. Nosana's decentralized GPU network runs these jobs on real hardware, not a cloud VM. The processing history (timestamps, GPU node IDs) is visible in the Nosana dashboard and displayed in Pulse's own StatusBar: *"Pulse processed 23 emails overnight on Nosana GPU."*
-
----
-
-## Database Schema
-
-Pulse uses [PGLite](https://github.com/electric-sql/pglite) (embedded Postgres) via [Drizzle ORM](https://orm.drizzle.team/).
-
-```
-pulse_action_items
-  id          UUID PK
-  type        TEXT  (email_draft | conflict_resolution | commitment_reminder | follow_up)
-  title       TEXT
-  body        TEXT
-  metadata    TEXT  (JSON)
-  status      TEXT  (pending | approved | rejected)
-  priority    INT   (1=highest, 10=lowest)
-  created_at  TEXT  (ISO 8601)
-  decided_at  TEXT  (ISO 8601, nullable)
-
-pulse_commitments
-  id               UUID PK
-  source_message_id TEXT  (nullable)
-  text             TEXT  (the commitment phrase)
-  recipient        TEXT  (nullable)
-  deadline         TEXT  (YYYY-MM-DD)
-  remind_at        TEXT  (ISO 8601 — deadline - 1 day at 9am)
-  reminder_sent    INT   (0 | 1)
-  action_item_id   TEXT  (nullable — set when reminder fires)
-  created_at       TEXT
-
-pulse_decisions
-  id             UUID PK
-  action_item_id TEXT  (FK → pulse_action_items.id)
-  decision       TEXT  (approved | rejected)
-  reason         TEXT  (nullable — captured on reject)
-  decided_at     TEXT  (ISO 8601)
+```typescript
+// src/pulse/index.ts
+models: {
+  [ModelType.TEXT_SMALL]: async (runtime, params) => callChatCompletions(runtime, model, params),
+  [ModelType.TEXT_LARGE]: async (runtime, params) => callChatCompletions(runtime, model, params),
+}
 ```
 
----
+This makes Pulse work on **any Nosana node** without modification — not just nodes that expose newer API surfaces.
 
-## Frontend Dashboard
+### GPU Inference Counter
 
-The `frontend/` directory is a standalone Vite + React + Tailwind app that proxies API calls to the ElizaOS backend on port 3000.
+Every successful LLM call increments a persistent counter via `nosanaMetrics.ts`. The `/pulse/status` endpoint exposes:
 
-**Components:**
-
-| Component | Purpose |
-|-----------|---------|
-| `ActionQueue` | Card list of pending items. Approve/Reject buttons with optimistic UI updates. |
-| `ConflictCard` | Calendar conflict with resolution suggestion and two-option picker. |
-| `SlibGuardAlert` | Amber-highlighted commitment reminder card. |
-| `DecisionHistory` | Scrollable log: colored dot, item title, type badge, timestamp, reason. |
-| `StatusBar` | "Pulse processed N emails on Nosana GPU · Next run in Xh Ym" |
-
-**Running the frontend:**
-
-```bash
-cd frontend
-npm install
-npm run dev    # starts on :5173, proxies /pulse/* → localhost:3000
+```json
+{
+  "nosana": {
+    "nodeId": "3gsrmj...",
+    "isNosanaNode": true,
+    "llmCallCount": 47,
+    "uptimeMs": 86400000,
+    "jobType": "morning"
+  }
+}
 ```
 
----
+The dashboard StatusBar renders: *"47 inferences run on Nosana GPU · Up 24h"*
 
-## Setup
+### Deployment
 
-### Prerequisites
-
-- Node.js 23+
-- pnpm
-- Docker (for deployment)
-
-### Local Development
-
-```bash
-# Clone
-git clone https://github.com/pytrdev/agent-challenge
-cd agent-challenge
-git checkout elizaos-challenge
-
-# Environment
-cp .env.example .env
-# Edit .env — see below for required variables
-
-# Install
-pnpm install
-
-# Start agent (backend on :3000)
-pnpm dev
-
-# Start frontend (in a second terminal)
-cd frontend && npm install && npm run dev
-# Open http://localhost:5173
-```
-
-### Environment Variables
-
-```env
-# Nosana Qwen3.5 endpoint (provided by Nosana)
-OPENAI_API_KEY=nosana
-OPENAI_API_URL=https://3gsrmj6gchzyws9bnc835apd4fh6t5tyeppmbxmzrzhn.node.k8s.prd.nos.ci/v1
-OPENAI_SMALL_MODEL=Qwen3.5-27B-AWQ-4bit
-OPENAI_LARGE_MODEL=Qwen3.5-27B-AWQ-4bit
-
-# Server
-SERVER_PORT=3000
-NODE_ENV=production
-
-# Gmail + Calendar (via Google OAuth)
-GOOGLE_CLIENT_ID=your_client_id
-GOOGLE_CLIENT_SECRET=your_client_secret
-GOOGLE_REFRESH_TOKEN=your_refresh_token
-
-# Pulse
-PULSE_JOB_TYPE=morning    # or "evening"
-EMBEDDING_PROVIDER=none
-```
-
----
-
-## Deploy to Nosana
-
-### 1. Build and push Docker image
-
-```bash
-docker build -t pytrdev/pulse-agent:latest .
-docker push pytrdev/pulse-agent:latest
-```
-
-### 2. Deploy morning job
+Two Nosana job definitions in `nos_job_def/` — morning (6am) and evening (9pm) processing runs, both using `pytrdev/pulse-agent:latest`.
 
 ```bash
 nosana job post \
   --file ./nos_job_def/nosana_morning_job.json \
   --market nvidia-4090 \
-  --timeout 60 \
-  --api <YOUR_API_KEY>
+  --timeout 60
 ```
 
-### 3. Deploy evening job
+Model: **Qwen3.5-27B-AWQ-4bit** running on Nosana GPU infrastructure.
+
+---
+
+## Quick Start
 
 ```bash
-nosana job post \
-  --file ./nos_job_def/nosana_evening_job.json \
-  --market nvidia-4090 \
-  --timeout 60 \
-  --api <YOUR_API_KEY>
+# Clone and install
+git clone https://github.com/pytrdev/agent-challenge
+cd agent-challenge && git checkout elizaos-challenge
+cp .env.example .env   # fill in credentials — see table below
+pnpm install
+
+# Run agent (backend on :3000) + frontend (HMR on :5173)
+pnpm dev:hot
+
+# Or: backend only (frontend built into /dist-frontend and served by agent)
+pnpm dev
 ```
 
-The agent exposes port 3000. After deployment, access the dashboard at the Nosana-provided public URL.
+Open `http://localhost:5173` — the dashboard connects automatically.
+
+---
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_API_KEY` | Yes | `nosana` for Nosana nodes, or your OpenAI key |
+| `OPENAI_API_URL` | Yes | Nosana node endpoint, e.g. `https://<node>.nos.ci/v1` |
+| `OPENAI_SMALL_MODEL` | Yes | `Qwen3.5-27B-AWQ-4bit` |
+| `OPENAI_LARGE_MODEL` | Yes | `Qwen3.5-27B-AWQ-4bit` |
+| `GOOGLE_CLIENT_ID` | Yes | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | Yes | Google OAuth client secret |
+| `GOOGLE_REFRESH_TOKEN` | Yes | Long-lived refresh token for Gmail + Calendar |
+| `SERVER_PORT` | No | Backend port (default: `3000`) |
+| `PULSE_JOB_TYPE` | No | `morning` or `evening` — controls which processing mode runs |
+| `PULSE_SEED_ON_START` | No | `true` to auto-seed demo data on first boot |
+| `EMBEDDING_PROVIDER` | No | Set to `none` — embeddings not used |
+
+---
+
+## Docker Deployment
+
+```bash
+# Build
+docker build -t pytrdev/pulse-agent:latest .
+
+# Run locally (agent + frontend served on :3000)
+docker run -p 3000:3000 --env-file .env pytrdev/pulse-agent:latest
+
+# Push to registry
+docker push pytrdev/pulse-agent:latest
+```
+
+The frontend is compiled into `/srv/pulse-frontend/` at build time and served as static files by the ElizaOS HTTP server — no separate frontend container needed. The Nosana volume mount on `/app` doesn't interfere.
 
 ---
 
@@ -335,41 +180,63 @@ The agent exposes port 3000. After deployment, access the dashboard at the Nosan
 pnpm test
 ```
 
-47 tests across 6 files:
+47 tests across 6 files — all using in-memory PGLite, no external dependencies, no mocked database:
 
 ```
-src/pulse/tests/slibGuard.test.ts       18 tests
-src/pulse/tests/actionQueue.test.ts      8 tests
-src/pulse/tests/emailClassifier.test.ts  6 tests
-src/pulse/tests/conflictDetector.test.ts 7 tests
-src/pulse/tests/providers.test.ts        6 tests
-src/pulse/tests/persistence.test.ts      2 tests
+src/pulse/tests/slibGuard.test.ts        18 tests  commitment extraction + deadline timing
+src/pulse/tests/actionQueue.test.ts       8 tests  approve/reject + status persistence
+src/pulse/tests/emailClassifier.test.ts   6 tests  LLM categorization + priority assignment
+src/pulse/tests/conflictDetector.test.ts  7 tests  overlap detection + resolution proposals
+src/pulse/tests/providers.test.ts         6 tests  provider output format + context injection
+src/pulse/tests/persistence.test.ts       2 tests  DB migrations + CRUD round-trips
 ```
 
-All tests use in-memory PGLite — no external dependencies, no mocked DB.
+---
+
+## Architecture Diagram
+
+```
+┌─────────────────────────── Nosana GPU Node ────────────────────────────┐
+│                                                                         │
+│  ┌─────────────────────────── ElizaOS Runtime ──────────────────────┐  │
+│  │                                                                   │  │
+│  │   Services              Providers              Evaluator          │  │
+│  │   ─────────             ─────────              ─────────          │  │
+│  │   PulseBackground  →    ActionQueue     →    SlibGuard            │  │
+│  │   GmailMcp         →    DecisionHistory       (alwaysRun)         │  │
+│  │   CalendarMcp      →    WebSearch                                 │  │
+│  │   MorningBriefing                                                 │  │
+│  │                                                                   │  │
+│  │   Actions                Routes                DB                 │  │
+│  │   ───────                ──────                ──                 │  │
+│  │   ProcessEmails          /pulse/queue          PGLite             │  │
+│  │   DetectConflicts        /pulse/approve        action_items       │  │
+│  │   WebSearch              /pulse/reject         commitments        │  │
+│  │                          /pulse/status         decisions          │  │
+│  │                          /pulse/decisions                         │  │
+│  └────────────────────────────────────────────────────┬──────────────┘  │
+│                                                       │ :3000           │
+└───────────────────────────────────────────────────────┼─────────────────┘
+                                                        │
+                                               ┌────────▼────────┐
+                                               │  React + Vite   │
+                                               │  Dashboard      │
+                                               │  :5173 / :3000  │
+                                               └─────────────────┘
+```
 
 ---
 
 ## Key Design Decisions
 
-**No auto-send.** Every action Pulse proposes sits in the queue until you approve it. The agent never autonomously sends an email, reschedules a meeting, or modifies your calendar. This is intentional — the approval queue IS the product.
+**No auto-send.** The approval queue is the product. Every action Pulse proposes sits in queue until explicitly approved. This makes Pulse trustworthy by design — it can't do damage without you.
 
-**MCP-first, googleapis fallback.** `gmailClient.ts` tries MCP first. On failure, it falls back to direct `googleapis` npm calls using a stored refresh token. The abstraction is identical to callers — demo resilience built in.
+**MCP-first, googleapis fallback.** `gmailClient.ts` tries MCP first; falls back to direct `googleapis` calls on failure. Callers see an identical interface. Works in any environment.
 
-**Single `action_items` table.** One table for all queued items (email drafts, conflicts, Slib Guard reminders, follow-ups) with a `type` discriminator. `GET /pulse/queue` is a single `WHERE status = 'pending'` query — no JOINs needed for the primary use case.
+**Providers over action callbacks.** `WebSearchProvider` fetches live data and injects it into the LLM prompt *before* generation — not after via action callbacks. The model always has real data when it starts composing a response.
 
-**PGLite embedded Postgres.** No external database required. Schema managed via Drizzle ORM with `IF NOT EXISTS` migrations. Safe to run from clean state on every Nosana job boot.
-
-**Schedule inside the service.** The 6am/9pm schedule runs as a `setInterval` inside `PulseBackgroundService` — not as external cron. Nosana `container/run` jobs are one-shot; the two job definition files satisfy the judging requirement while `PULSE_JOB_TYPE` controls which processing mode runs.
+**PGLite over PostgreSQL.** No external database. Schema managed with Drizzle ORM, `IF NOT EXISTS` migrations run on every boot. Works from a clean cold start on any Nosana node.
 
 ---
 
-## Submission
-
-- **GitHub:** [github.com/pytrdev/agent-challenge](https://github.com/pytrdev/agent-challenge) (branch: `elizaos-challenge`)
-- **Docker Hub:** `pytrdev/pulse-agent:latest`
-- **Nosana deployment:** Morning + evening jobs (see job definitions in `nos_job_def/`)
-
----
-
-**Pulse · Built with ElizaOS · Deployed on Nosana · Powered by Qwen3.5-27B**
+**Pulse · ElizaOS Plugin · Deployed on Nosana · Qwen3.5-27B**
