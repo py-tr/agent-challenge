@@ -1,28 +1,14 @@
 /**
  * src/pulse/actions/WebSearchAction.ts
- * ElizaOS Action — web search via DuckDuckGo Instant Answer API.
+ * ElizaOS Action — multi-source web search with no API keys required.
  *
- * Why DuckDuckGo instead of a paid plugin:
- *   - Zero API keys required — works immediately on any Nosana node
- *   - Native ElizaOS Action pattern — demonstrates architecture understanding
- *   - DDG Instant Answer API is free and covers factual queries, Wikipedia
- *     summaries, calculations, conversions, and related-topic results
+ * Source routing:
+ *   1. Weather queries  → wttr.in (real-time, structured JSON)
+ *   2. General queries  → DDG Instant Answer API (Wikipedia/factual)
+ *                         → DDG HTML scrape fallback (live web snippets)
  *
- * Trigger phrases detected in validate():
- *   "search for X", "look up X", "find X", "web search X",
- *   "what is X", "who is X", "when did X", "how does X",
- *   "tell me about X", "google X"
- *
- * Flow:
- *   1. validate() detects search intent
- *   2. handler() extracts the search query from the message
- *   3. Queries api.duckduckgo.com for instant answers + related results
- *   4. Streams formatted results back via callback
- *   5. Returns ActionResult with the search findings
- *
- * DuckDuckGo API reference:
- *   https://duckduckgo.com/duckduckgo-help-pages/settings/params/
- *   GET https://api.duckduckgo.com/?q=QUERY&format=json&no_html=1&skip_disambig=1
+ * All sources use AbortController + manual setTimeout for timeout
+ * (AbortSignal.timeout() requires Node ≥ 17.3, not guaranteed on Nosana).
  */
 
 import type {
@@ -34,12 +20,114 @@ import type {
   HandlerCallback,
 } from "@elizaos/core";
 
-// ─── DDG API types ────────────────────────────────────────────────────────────
+// ─── Shared helpers ───────────────────────────────────────────────────────────
+
+interface SearchResult {
+  title:   string;
+  url:     string;
+  snippet: string;
+}
+
+function timedFetch(url: string, init: RequestInit, ms = 8_000): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(id));
+}
+
+function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ");
+}
+
+// ─── Weather via wttr.in ──────────────────────────────────────────────────────
+
+const WEATHER_RE = /weather|forecast|temperature|rain|sunny|celsius|fahrenheit|hot|cold|wind|humidity/i;
+
+interface WttrCondition {
+  temp_C: string;
+  FeelsLikeC: string;
+  humidity: string;
+  windspeedKmph: string;
+  weatherDesc: { value: string }[];
+}
+
+interface WttrDay {
+  date: string;
+  maxtempC: string;
+  mintempC: string;
+  avgtempC: string;
+  hourly: { weatherDesc: { value: string }[]; time: string }[];
+}
+
+interface WttrResponse {
+  current_condition: WttrCondition[];
+  weather: WttrDay[];
+  nearest_area?: { areaName: { value: string }[]; country: { value: string }[] }[];
+}
+
+function extractCity(query: string): string {
+  const match = query.match(
+    /(?:in|for|at)\s+([A-Z][a-zA-Z\s]+?)(?:\s+tomorrow|\s+today|\s+this week|\?|$)/i
+  );
+  return match?.[1]?.trim() || "London";
+}
+
+function dayLabel(date: string): string {
+  try {
+    return new Date(date).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  } catch {
+    return date;
+  }
+}
+
+async function weatherSearch(query: string): Promise<SearchResult[]> {
+  const city = extractCity(query);
+  const url = `https://wttr.in/${encodeURIComponent(city)}?format=j1`;
+  const resp = await timedFetch(url, {
+    headers: { "User-Agent": "Pulse/1.0 ElizaOS-Agent", "Accept": "application/json" },
+  });
+  if (!resp.ok) throw new Error(`wttr.in responded with ${resp.status}`);
+
+  const data = (await resp.json()) as WttrResponse;
+  const cur = data.current_condition?.[0];
+  const area = data.nearest_area?.[0];
+  const location = area
+    ? `${area.areaName[0]?.value ?? city}, ${area.country[0]?.value ?? ""}`
+    : city;
+
+  const results: SearchResult[] = [];
+
+  if (cur) {
+    results.push({
+      title:   `Current weather in ${location}`,
+      url:     `https://wttr.in/${encodeURIComponent(city)}`,
+      snippet: `${cur.weatherDesc[0]?.value ?? ""}. ${cur.temp_C}°C (feels like ${cur.FeelsLikeC}°C). Humidity ${cur.humidity}%. Wind ${cur.windspeedKmph} km/h.`,
+    });
+  }
+
+  // Next 3 days forecast
+  for (const day of (data.weather ?? []).slice(0, 3)) {
+    const desc = day.hourly?.[4]?.weatherDesc?.[0]?.value ?? day.hourly?.[0]?.weatherDesc?.[0]?.value ?? "";
+    results.push({
+      title:   dayLabel(day.date),
+      url:     "",
+      snippet: `${desc}. High ${day.maxtempC}°C / Low ${day.mintempC}°C (avg ${day.avgtempC}°C).`,
+    });
+  }
+
+  return results;
+}
+
+// ─── DDG Instant Answer API ───────────────────────────────────────────────────
 
 interface DdgTopic {
   Text: string;
   FirstURL: string;
-  Icon?: { URL?: string };
 }
 
 interface DdgResponse {
@@ -48,153 +136,43 @@ interface DdgResponse {
   AbstractSource?: string;
   AbstractURL?: string;
   Answer?: string;
-  AnswerType?: string;
-  Image?: string;
   Results?: DdgTopic[];
   RelatedTopics?: (DdgTopic | { Name: string; Topics: DdgTopic[] })[];
-  Type?: string; // "A" = Article, "D" = Disambiguation, "C" = Category, "" = nothing
 }
 
-interface SearchResult {
-  title: string;
-  url:   string;
-  snippet: string;
-}
-
-// ─── Query extraction ─────────────────────────────────────────────────────────
-
-const SEARCH_PREFIXES = [
-  "search for ",
-  "search ",
-  "look up ",
-  "look up",
-  "web search ",
-  "find information about ",
-  "find ",
-  "tell me about ",
-  "google ",
-] as const;
-
-const QUESTION_PREFIXES = [
-  "what is ",
-  "what are ",
-  "who is ",
-  "who was ",
-  "when did ",
-  "when was ",
-  "where is ",
-  "where was ",
-  "how does ",
-  "how did ",
-  "why is ",
-  "why did ",
-] as const;
-
-function extractSearchQuery(text: string): string {
-  const t = text.trim();
-  const lower = t.toLowerCase();
-
-  // Strip common search prefixes
-  for (const prefix of SEARCH_PREFIXES) {
-    if (lower.startsWith(prefix)) {
-      return t.slice(prefix.length).replace(/\?$/, "").trim();
-    }
-  }
-
-  // For question-style queries, use the full text as the search query
-  for (const prefix of QUESTION_PREFIXES) {
-    if (lower.startsWith(prefix)) {
-      return t.replace(/\?$/, "").trim();
-    }
-  }
-
-  // Fallback: use full text
-  return t.replace(/\?$/, "").trim();
-}
-
-// ─── Trigger detection ────────────────────────────────────────────────────────
-
-function isWebSearchRequest(text: string): boolean {
-  if (!text || text.length < 5) return false;
-  const t = text.toLowerCase();
-
-  const hasSearchIntent = SEARCH_PREFIXES.some((p) => t.includes(p));
-  const isQuestion = QUESTION_PREFIXES.some((p) => t.startsWith(p));
-
-  return hasSearchIntent || isQuestion;
-}
-
-// ─── DuckDuckGo search ────────────────────────────────────────────────────────
-
-async function duckDuckGoSearch(query: string): Promise<SearchResult[]> {
-  const params = new URLSearchParams({
-    q:             query,
-    format:        "json",
-    no_html:       "1",
-    skip_disambig: "1",
+async function ddgInstantSearch(query: string): Promise<SearchResult[]> {
+  const params = new URLSearchParams({ q: query, format: "json", no_html: "1", skip_disambig: "1" });
+  const resp = await timedFetch(`https://api.duckduckgo.com/?${params}`, {
+    headers: { "User-Agent": "Pulse/1.0 ElizaOS-Agent", "Accept": "application/json" },
   });
-
-  const resp = await fetch(`https://api.duckduckgo.com/?${params.toString()}`, {
-    headers: {
-      "User-Agent":
-        "Pulse/1.0 ElizaOS-Agent (Nosana GPU; +github.com/nosana-ci/agent-challenge)",
-      "Accept": "application/json",
-    },
-    signal: AbortSignal.timeout(8_000),
-  });
-
-  if (!resp.ok) {
-    throw new Error(`DuckDuckGo API responded with ${resp.status}`);
-  }
+  if (!resp.ok) throw new Error(`DDG API ${resp.status}`);
 
   const data = (await resp.json()) as DdgResponse;
   const results: SearchResult[] = [];
 
-  // 1. Direct instant answer (math, conversions, factual lookups)
   if (data.Answer) {
-    results.push({
-      title:   "Direct Answer",
-      url:     "",
-      snippet: data.Answer,
-    });
+    results.push({ title: "Direct Answer", url: "", snippet: data.Answer });
   }
-
-  // 2. Knowledge-panel abstract (Wikipedia / other knowledge source)
   if (data.AbstractText) {
-    const source = data.AbstractSource ? `${data.AbstractSource}` : "Summary";
+    const src = data.AbstractSource ?? "Summary";
     results.push({
-      title:   `${source}: ${data.Heading ?? query}`,
+      title:   `${src}: ${data.Heading ?? query}`,
       url:     data.AbstractURL ?? "",
-      snippet: data.AbstractText.length > 400
-        ? data.AbstractText.slice(0, 397) + "…"
-        : data.AbstractText,
+      snippet: data.AbstractText.length > 400 ? data.AbstractText.slice(0, 397) + "…" : data.AbstractText,
     });
   }
-
-  // 3. Direct web results
   for (const r of data.Results ?? []) {
     if (results.length >= 5) break;
-    if (r.Text && r.FirstURL) {
-      results.push({
-        title:   r.Text.slice(0, 100),
-        url:     r.FirstURL,
-        snippet: r.Text,
-      });
-    }
+    if (r.Text && r.FirstURL) results.push({ title: r.Text.slice(0, 100), url: r.FirstURL, snippet: r.Text });
   }
 
-  // 4. Related topics (the bulk of web results for general queries)
   const flatTopics: DdgTopic[] = [];
   for (const item of data.RelatedTopics ?? []) {
-    if ("Topics" in item) {
-      flatTopics.push(...item.Topics);
-    } else {
-      flatTopics.push(item as DdgTopic);
-    }
+    if ("Topics" in item) flatTopics.push(...(item as { Topics: DdgTopic[] }).Topics);
+    else flatTopics.push(item as DdgTopic);
   }
-
   for (const t of flatTopics) {
-    if (results.length >= 6) break;
+    if (results.length >= 5) break;
     if (t.Text && t.FirstURL && !t.FirstURL.includes("duckduckgo.com")) {
       results.push({
         title:   t.Text.slice(0, 100),
@@ -204,32 +182,99 @@ async function duckDuckGoSearch(query: string): Promise<SearchResult[]> {
     }
   }
 
-  return results.slice(0, 5);
+  return results;
 }
 
-// ─── Format results as markdown ───────────────────────────────────────────────
+// ─── DDG HTML scrape fallback ─────────────────────────────────────────────────
+
+async function ddgHtmlSearch(query: string): Promise<SearchResult[]> {
+  const url = `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+  const resp = await timedFetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (compatible; Pulse/1.0)",
+      "Accept": "text/html",
+    },
+  });
+  if (!resp.ok) throw new Error(`DDG HTML ${resp.status}`);
+
+  const html = await resp.text();
+  const results: SearchResult[] = [];
+
+  // Extract result snippets: <a class="result__snippet">...</a>
+  const snippetRe = /<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/g;
+  // Extract result titles: <a class="result__a">...</a>
+  const titleRe   = /<a[^>]+class="[^"]*result__a[^"]*"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g;
+
+  const titles: { url: string; text: string }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = titleRe.exec(html)) && titles.length < 5) {
+    titles.push({ url: m[1], text: decodeHtmlEntities(m[2].replace(/<[^>]+>/g, "").trim()) });
+  }
+
+  let i = 0;
+  while ((m = snippetRe.exec(html)) && results.length < 3) {
+    const snippet = decodeHtmlEntities(m[1].replace(/<[^>]+>/g, "").trim());
+    if (snippet.length > 20) {
+      results.push({
+        title:   titles[i]?.text ?? `Result ${i + 1}`,
+        url:     titles[i]?.url ?? "",
+        snippet,
+      });
+    }
+    i++;
+  }
+
+  return results;
+}
+
+// ─── Routing + formatting ─────────────────────────────────────────────────────
+
+async function search(query: string): Promise<SearchResult[]> {
+  if (WEATHER_RE.test(query)) {
+    return weatherSearch(query);
+  }
+
+  // Try DDG Instant Answer first; fall through to HTML scrape if 0 results
+  const instant = await ddgInstantSearch(query);
+  if (instant.length > 0) return instant;
+  return ddgHtmlSearch(query);
+}
 
 function formatResults(query: string, results: SearchResult[]): string {
   if (results.length === 0) {
-    return (
-      `No results found for **"${query}"** via DuckDuckGo. ` +
-      `Try rephrasing or being more specific.`
-    );
+    return `No results found for "${query}". Try rephrasing or being more specific.`;
   }
 
-  const lines: string[] = [
-    `**Search results for "${query}"** (via DuckDuckGo)\n`,
-  ];
-
-  for (let i = 0; i < results.length; i++) {
-    const r = results[i];
-    lines.push(`**${i + 1}. ${r.title}**`);
-    if (r.url) lines.push(`   ${r.url}`);
-    lines.push(`   ${r.snippet}`);
-    lines.push("");
+  const lines: string[] = [];
+  for (const r of results) {
+    lines.push(r.title ? `${r.title}: ${r.snippet}` : r.snippet);
   }
+  return lines.join("\n");
+}
 
-  return lines.join("\n").trim();
+// ─── Query extraction ─────────────────────────────────────────────────────────
+
+const SEARCH_PREFIXES = [
+  "search for ", "search ", "look up ", "web search ",
+  "find information about ", "find ", "tell me about ", "google ",
+] as const;
+
+const QUESTION_PREFIXES = [
+  "what is ", "what are ", "who is ", "who was ",
+  "when did ", "when was ", "where is ", "where was ",
+  "how does ", "how did ", "why is ", "why did ",
+] as const;
+
+function extractSearchQuery(text: string): string {
+  const t = text.trim();
+  const lower = t.toLowerCase();
+  for (const p of SEARCH_PREFIXES) {
+    if (lower.startsWith(p)) return t.slice(p.length).replace(/\?$/, "").trim();
+  }
+  for (const p of QUESTION_PREFIXES) {
+    if (lower.startsWith(p)) return t.replace(/\?$/, "").trim();
+  }
+  return t.replace(/\?$/, "").trim();
 }
 
 // ─── Action definition ────────────────────────────────────────────────────────
@@ -238,55 +283,32 @@ export const webSearchAction: Action = {
   name: "WEB_SEARCH",
 
   description:
-    "Search the web for up-to-date information using DuckDuckGo Instant Answers. " +
-    "Returns summaries, Wikipedia abstracts, direct answers, and related results. " +
-    "No API key required — runs directly on the Nosana node.",
+    "Search the web for current information. Routes weather queries to wttr.in (real-time), " +
+    "factual queries to DuckDuckGo Instant Answers, and falls back to DuckDuckGo HTML scraping " +
+    "for live web results. No API keys required — runs on any Nosana node.",
 
   similes: [
+    "SEARCH",
     "SEARCH_WEB",
-    "DUCKDUCKGO",
-    "WEB_LOOKUP",
-    "FIND_ONLINE",
-    "SEARCH_INTERNET",
-    "INTERNET_SEARCH",
     "LOOK_UP",
+    "FIND_INFORMATION",
+    "GET_CURRENT_INFO",
+    "RESEARCH",
+    "CHECK_FACTS",
   ],
 
   examples: [
     [
-      { name: "user", content: { text: "Search for Nosana network status" } },
-      {
-        name: "Pulse",
-        content: {
-          text: "Searching DuckDuckGo for 'Nosana network status'…",
-        },
-      },
+      { name: "user", content: { text: "What's the weather in Prague tomorrow?" } },
+      { name: "Pulse", content: { text: "[searches wttr.in] Partly cloudy, 14°C high. Light rain in the afternoon." } },
     ],
     [
-      { name: "user", content: { text: "What is the Qwen3.5 model?" } },
-      {
-        name: "Pulse",
-        content: {
-          text: "Let me look that up via DuckDuckGo…",
-        },
-      },
+      { name: "user", content: { text: "Search for Nosana network" } },
+      { name: "Pulse", content: { text: "[searches web] Nosana is a decentralized GPU compute network on Solana…" } },
     ],
   ],
 
-  // ── Validate ────────────────────────────────────────────────────────────────
-
-  validate: async (
-    _runtime: IAgentRuntime,
-    message: Memory,
-    _state?: State
-  ): Promise<boolean> => {
-    const text = typeof message.content === "string"
-      ? message.content
-      : (message.content as { text?: string })?.text ?? "";
-    return isWebSearchRequest(text);
-  },
-
-  // ── Handler ─────────────────────────────────────────────────────────────────
+  validate: async (): Promise<boolean> => true,
 
   handler: async (
     _runtime: IAgentRuntime,
@@ -301,27 +323,17 @@ export const webSearchAction: Action = {
 
     const query = extractSearchQuery(rawText);
 
-    // Immediate acknowledgement so the user sees activity
-    await callback?.({
-      text: `Searching DuckDuckGo for **"${query}"**…`,
-    });
-
     try {
-      const results = await duckDuckGoSearch(query);
+      const results = await search(query);
       const formatted = formatResults(query, results);
 
       await callback?.({ text: formatted });
-      return { success: true, data: { query, resultCount: results.length } };
+      return { success: true, text: formatted, data: { query, resultCount: results.length } };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[Pulse:WebSearch] DuckDuckGo search failed: ${msg}`);
-
-      await callback?.({
-        text:
-          `Web search temporarily unavailable (${msg}). ` +
-          `Please try again in a moment.`,
-      });
-      return { success: false, error: msg };
+      const errText = `Web search unavailable (${msg}). Try again in a moment.`;
+      await callback?.({ text: errText });
+      return { success: false, text: errText, error: msg };
     }
   },
 };

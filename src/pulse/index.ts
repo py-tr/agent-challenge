@@ -27,6 +27,7 @@ import { slibGuardEvaluator } from "./evaluators/SlibGuardEvaluator.js";
 import { pulseRoutes } from "./routes/pulseRoutes.js";
 import { actionQueueProvider } from "./providers/ActionQueueProvider.js";
 import { decisionHistoryProvider } from "./providers/DecisionHistoryProvider.js";
+import { webSearchProvider } from "./providers/WebSearchProvider.js";
 import { recordLlmCall } from "./lib/nosanaMetrics.js";
 
 // ─── Chat Completions Shim ────────────────────────────────────────────────────
@@ -150,7 +151,7 @@ export const pulsePlugin: Plugin = {
   actions: [processEmailsAction, detectConflictsAction, webSearchAction],
 
   // ── Providers ────────────────────────────────────────────────────────────────
-  providers: [actionQueueProvider, decisionHistoryProvider],
+  providers: [actionQueueProvider, decisionHistoryProvider, webSearchProvider],
 
   // ── Evaluators ───────────────────────────────────────────────────────────────
   evaluators: [slibGuardEvaluator],

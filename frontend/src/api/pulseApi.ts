@@ -119,6 +119,9 @@ interface AgentResponseContent {
   text: string;
   thought?: string;
   actions?: string[];
+  // Set by ElizaOS after actions run — contains action callback output (e.g. search results).
+  // This is the correct source when the LLM replies with REPLY + WEB_SEARCH.
+  actionCallbacks?: { text?: string };
 }
 
 interface SendMessageResponse {
@@ -151,11 +154,14 @@ export const agentApi = {
    * Send a message in an existing session and wait for the agent response.
    * Uses transport: "http" which blocks until the agent replies.
    */
-  sendMessage: async (sessionId: string, content: string): Promise<string> => {
+  sendMessage: async (sessionId: string, content: string, signal?: AbortSignal): Promise<string> => {
     const data = await request<SendMessageResponse>(
       `/api/messaging/sessions/${sessionId}/messages`,
-      { method: "POST", body: JSON.stringify({ content, transport: "http" }) }
+      { method: "POST", body: JSON.stringify({ content, transport: "http" }), signal }
     );
-    return data.agentResponse?.text ?? "";
+    console.log("[ChatAPI] Raw response:", JSON.stringify(data));
+    // actionCallbacks.text contains action output (e.g. WEB_SEARCH results).
+    // Fall back to agentResponse.text which is the LLM's REPLY text.
+    return data.agentResponse?.actionCallbacks?.text || data.agentResponse?.text || "";
   },
 };

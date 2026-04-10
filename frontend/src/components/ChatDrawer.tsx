@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { X, ArrowUp, MessageSquare } from "lucide-react";
+import { X, ArrowUp, Square, MessageSquare } from "lucide-react";
 import { agentApi } from "../api/pulseApi";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -104,6 +104,8 @@ export function ChatDrawer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const processedAutoSend = useRef<string | null>(null);
   const welcomeShown = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -121,6 +123,13 @@ export function ChatDrawer({
 
   // ── Core send function ──────────────────────────────────────────────────────
 
+  const cancelRequest = useCallback(() => {
+    if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsLoading(false);
+  }, []);
+
   const sendToAgent = useCallback(
     async (text: string) => {
       if (!agentId) return;
@@ -130,6 +139,23 @@ export function ChatDrawer({
       // Append user message
       setMessages((prev) => [...prev, { role: "user", text: trimmed, ts: new Date() }]);
       setIsLoading(true);
+
+      // Fresh AbortController for this request
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      // 30s timeout — abort and show a timeout message
+      timeoutRef.current = setTimeout(() => {
+        if (abortRef.current === controller) {
+          controller.abort();
+          abortRef.current = null;
+          setIsLoading(false);
+          setMessages((prev) => [
+            ...prev,
+            { role: "agent", text: "No response after 30s. Try again.", ts: new Date() },
+          ]);
+        }
+      }, 30_000);
 
       try {
         // Lazily create session if needed
@@ -141,14 +167,32 @@ export function ChatDrawer({
           setSessionId(sid);
         }
 
-        const reply = await agentApi.sendMessage(sid, trimmed);
+        let reply: string;
+        try {
+          reply = await agentApi.sendMessage(sid, trimmed, controller.signal);
+        } catch (err) {
+          // Stale session after backend restart — create a new one and retry once
+          const errMsg = err instanceof Error ? err.message : String(err);
+          if (errMsg.includes("SESSION_NOT_FOUND") || errMsg.includes("404")) {
+            try { sessionStorage.removeItem(SESSION_STORAGE_KEY); } catch { /* ignore */ }
+            const userId = getOrCreateUserId();
+            const freshSid = await agentApi.createSession(agentId, userId);
+            storeSessionId(freshSid);
+            setSessionId(freshSid);
+            reply = await agentApi.sendMessage(freshSid, trimmed, controller.signal);
+          } else {
+            throw err;
+          }
+        }
+
         setMessages((prev) => [
           ...prev,
           { role: "agent", text: reply || "…", ts: new Date() },
         ]);
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Unknown error";
+        // Ignore abort errors — user cancelled intentionally
+        if (err instanceof Error && err.name === "AbortError") return;
+        const message = err instanceof Error ? err.message : "Unknown error";
         setMessages((prev) => [
           ...prev,
           {
@@ -157,11 +201,11 @@ export function ChatDrawer({
             ts: new Date(),
           },
         ]);
-        // If session might be stale (e.g., server restart), clear it so next
-        // send creates a fresh one.
         setSessionId(null);
         try { sessionStorage.removeItem(SESSION_STORAGE_KEY); } catch { /* ignore */ }
       } finally {
+        if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
+        abortRef.current = null;
         setIsLoading(false);
       }
     },
@@ -299,14 +343,24 @@ export function ChatDrawer({
             className="flex-1 resize-none bg-transparent text-sm text-gray-900 placeholder-gray-400 focus:outline-none disabled:opacity-50"
             style={{ minHeight: "24px", maxHeight: "84px" }}
           />
-          <button
-            onClick={() => void handleSubmit()}
-            disabled={!agentId || isLoading || !input.trim()}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white transition-colors hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
-            aria-label="Send message"
-          >
-            <ArrowUp size={14} />
-          </button>
+          {isLoading ? (
+            <button
+              onClick={cancelRequest}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-red-500 text-white transition-colors hover:bg-red-600 active:scale-95"
+              aria-label="Stop"
+            >
+              <Square size={12} fill="currentColor" />
+            </button>
+          ) : (
+            <button
+              onClick={() => void handleSubmit()}
+              disabled={!agentId || !input.trim()}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white transition-colors hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
+              aria-label="Send message"
+            >
+              <ArrowUp size={14} />
+            </button>
+          )}
         </div>
         <p className="mt-1.5 text-center text-[10px] text-gray-300">
           Shift+Enter for newline · Context-aware via ActionQueueProvider
