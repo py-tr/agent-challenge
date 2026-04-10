@@ -28,7 +28,8 @@ const SEARCH_UNAVAILABLE =
 // ─── Cache ────────────────────────────────────────────────────────────────────
 
 const cache = new Map<string, { result: string; ts: number }>();
-const CACHE_TTL_MS = 60_000;
+const CACHE_TTL_MS  = 60_000;
+const MAX_CACHE_SIZE = 50; // evict oldest entry when full
 
 function getCached(key: string): string | null {
   const entry = cache.get(key);
@@ -38,6 +39,11 @@ function getCached(key: string): string | null {
 }
 
 function setCached(key: string, result: string): void {
+  // Evict the oldest (insertion-order) entry when the cap is reached.
+  if (cache.size >= MAX_CACHE_SIZE) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
   cache.set(key, { result, ts: Date.now() });
 }
 

@@ -101,6 +101,27 @@ export async function countByStatus(
   return rows[0]?.n ?? 0;
 }
 
+/**
+ * Count all statuses in one GROUP BY query.
+ * Replaces three separate countByStatus() calls in /pulse/status.
+ */
+export async function countAllStatuses(
+  db: Db
+): Promise<{ pending: number; approved: number; rejected: number }> {
+  const rows = await db
+    .select({ status: actionItems.status, n: count() })
+    .from(actionItems)
+    .groupBy(actionItems.status);
+
+  const result = { pending: 0, approved: 0, rejected: 0 };
+  for (const row of rows) {
+    if (row.status === "pending" || row.status === "approved" || row.status === "rejected") {
+      result[row.status] = row.n;
+    }
+  }
+  return result;
+}
+
 // ─── Commitments ──────────────────────────────────────────────────────────────
 
 export async function insertCommitment(

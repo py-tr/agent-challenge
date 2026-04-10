@@ -165,7 +165,6 @@ export const agentApi = {
       `/api/messaging/sessions/${sessionId}/messages`,
       { method: "POST", body: JSON.stringify({ content, transport: "http" }), signal }
     );
-    console.log("[ChatAPI] Raw response:", JSON.stringify(data));
     // actionCallbacks.text contains action output (e.g. WEB_SEARCH results).
     // Fall back to agentResponse.text which is the LLM's REPLY text.
     return data.agentResponse?.actionCallbacks?.text || data.agentResponse?.text || "";

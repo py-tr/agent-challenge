@@ -27,8 +27,10 @@ export function useActionQueue(): QueueState {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  // Track IDs being mutated so buttons disable instantly
-  const [mutating, setMutating] = useState<Set<string>>(new Set());
+  // Use a ref (not state) for the in-flight ID set so approve/reject callbacks
+  // don't need to be recreated on every mutation. Components handle their own
+  // busy state locally via ItemCard.
+  const mutatingRef = useRef<Set<string>>(new Set());
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchAll = useCallback(async () => {
@@ -59,51 +61,37 @@ export function useActionQueue(): QueueState {
     };
   }, [fetchAll]);
 
-  const approve = useCallback(
-    async (id: string) => {
-      if (mutating.has(id)) return;
-      setMutating((s) => new Set(s).add(id));
-      try {
-        await pulseApi.approve(id);
-        // Optimistic remove from queue
-        setItems((prev) => prev.filter((i) => i.id !== id));
-        // Refresh decisions in background
-        void pulseApi.getDecisions(30).then(setDecisions).catch(() => null);
-        void pulseApi.getStatus().then(setStatus).catch(() => null);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setMutating((s) => {
-          const next = new Set(s);
-          next.delete(id);
-          return next;
-        });
-      }
-    },
-    [mutating]
-  );
+  const approve = useCallback(async (id: string) => {
+    if (mutatingRef.current.has(id)) return;
+    mutatingRef.current.add(id);
+    try {
+      await pulseApi.approve(id);
+      // Optimistic remove from queue
+      setItems((prev) => prev.filter((i) => i.id !== id));
+      // Refresh decisions in background
+      void pulseApi.getDecisions(30).then(setDecisions).catch(() => null);
+      void pulseApi.getStatus().then(setStatus).catch(() => null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      mutatingRef.current.delete(id);
+    }
+  }, []); // stable — no state deps; mutatingRef.current is mutable without re-render
 
-  const reject = useCallback(
-    async (id: string, reason?: string) => {
-      if (mutating.has(id)) return;
-      setMutating((s) => new Set(s).add(id));
-      try {
-        await pulseApi.reject(id, reason);
-        setItems((prev) => prev.filter((i) => i.id !== id));
-        void pulseApi.getDecisions(30).then(setDecisions).catch(() => null);
-        void pulseApi.getStatus().then(setStatus).catch(() => null);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setMutating((s) => {
-          const next = new Set(s);
-          next.delete(id);
-          return next;
-        });
-      }
-    },
-    [mutating]
-  );
+  const reject = useCallback(async (id: string, reason?: string) => {
+    if (mutatingRef.current.has(id)) return;
+    mutatingRef.current.add(id);
+    try {
+      await pulseApi.reject(id, reason);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+      void pulseApi.getDecisions(30).then(setDecisions).catch(() => null);
+      void pulseApi.getStatus().then(setStatus).catch(() => null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      mutatingRef.current.delete(id);
+    }
+  }, []); // stable
 
   const refresh = useCallback(() => void fetchAll(), [fetchAll]);
 

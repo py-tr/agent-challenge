@@ -16,7 +16,8 @@
  *   C. Reminders: getPendingReminders() → insert slib_reminder items for due commitments
  *
  * Deduplication:
- *   A. Email dedup is handled by GmailMcpService (processed_ids cache).
+ *   A. Email dedup is handled by GmailMcpService via the Gmail History API cursor
+ *      (pulse:gmail:last_history_id). Only messages added since the last sync are returned.
  *   B. Calendar dedup: before inserting a conflict, check existing pending
  *      conflict_resolution items for matching eventA/eventB IDs.
  *   C. Reminder dedup: getPendingReminders() only returns rows where

@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Check, X, ChevronDown, ChevronUp, CheckCircle2, MessageSquare } from "lucide-react";
 import type { ActionItem, ActionItemType } from "../api/pulseApi";
 import { SlibGuardAlert } from "./SlibGuardAlert";
@@ -119,6 +119,20 @@ function FilterPill({
 }
 
 // ─── Markdown body renderer ───────────────────────────────────────────────────
+//
+// Security: NO dangerouslySetInnerHTML. Content flows from Gmail / Google
+// Calendar / user messages → LLM → DB → here, so it is untrusted. Bold
+// (**text**) is rendered as React <strong> elements; everything else is
+// plain text. React escapes all text nodes automatically.
+
+function renderBold(text: string): React.ReactNode {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) =>
+    part.startsWith("**") && part.endsWith("**")
+      ? <strong key={i}>{part.slice(2, -2)}</strong>
+      : part
+  );
+}
 
 function BodyRenderer({ text }: { text: string }) {
   const parts = text.split(/\n\n+/);
@@ -126,22 +140,19 @@ function BodyRenderer({ text }: { text: string }) {
     <div className="space-y-2">
       {parts.map((para, i) => {
         if (para.startsWith("> ")) {
-          const inner = para.slice(2).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
           return (
             <blockquote
               key={i}
               className="border-l-[3px] border-gray-200 pl-3 text-sm italic text-gray-500 leading-relaxed"
-              dangerouslySetInnerHTML={{ __html: inner }}
-            />
+            >
+              {renderBold(para.slice(2))}
+            </blockquote>
           );
         }
-        const html = para.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
         return (
-          <p
-            key={i}
-            className="text-sm leading-relaxed text-gray-600"
-            dangerouslySetInnerHTML={{ __html: html }}
-          />
+          <p key={i} className="text-sm leading-relaxed text-gray-600">
+            {renderBold(para)}
+          </p>
         );
       })}
     </div>
@@ -170,6 +181,14 @@ function ItemCard({
   const [flash, setFlash] = useState<FlashState>("idle");
   const animTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const meta = TYPE_META[item.type] ?? TYPE_META.email_draft;
+
+  // M2: Clear animation timer if the card unmounts during the 200ms flash
+  // (e.g. optimistic remove fires before animation completes).
+  useEffect(() => {
+    return () => {
+      if (animTimer.current) clearTimeout(animTimer.current);
+    };
+  }, []);
 
   function triggerExit(type: "approve" | "reject") {
     if (animTimer.current) clearTimeout(animTimer.current);

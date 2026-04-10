@@ -35,7 +35,7 @@ import {
   insertDecision,
   insertActionItem,
   getDecisions,
-  countByStatus,
+  countAllStatuses,
   countDecisions,
   getDecisionPatterns,
 } from "../db/queries.js";
@@ -367,11 +367,9 @@ export const pulseRoutes: Route[] = [
           CalendarMcpService.serviceType
         ) as CalendarMcpService | null;
 
-        const [pending, approved, rejected, gmailInfo, calInfo] =
+        const [counts, gmailInfo, calInfo] =
           await Promise.all([
-            countByStatus(db, "pending"),
-            countByStatus(db, "approved"),
-            countByStatus(db, "rejected"),
+            countAllStatuses(db),
             gmailSvc?.getLastFetchInfo() ??
               Promise.resolve({ fetchedAt: null, messageCount: 0 }),
             calSvc?.getLastFetchInfo() ??
@@ -379,7 +377,7 @@ export const pulseRoutes: Route[] = [
           ]);
 
         ok(res, {
-          queue: { pending, approved, rejected },
+          queue: counts,
           gmail: gmailInfo,
           calendar: calInfo,
           agentName: runtime.character?.name ?? "Pulse",
