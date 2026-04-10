@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
-import { RefreshCw, AlertCircle, ChevronDown, ChevronUp, CheckCircle, XCircle } from "lucide-react";
+import { RefreshCw, AlertCircle, ChevronDown, ChevronUp, CheckCircle, XCircle, MessageSquare } from "lucide-react";
 import { useActionQueue } from "./hooks/useActionQueue";
 import { agentApi } from "./api/pulseApi";
 import { Sidebar, type SidebarView } from "./components/Sidebar";
 import { ActionQueue } from "./components/ActionQueue";
+import { HistoryView } from "./components/HistoryView";
+import { CommitmentsView } from "./components/CommitmentsView";
 import { DecisionHistory } from "./components/DecisionHistory";
 import { ChatDrawer } from "./components/ChatDrawer";
 
@@ -197,11 +199,6 @@ export default function App() {
   const rejected = status?.queue.rejected ?? 0;
   const committedCount = items.filter((i) => i.type === "slib_reminder").length;
 
-  const queueItems =
-    view === "commitments"
-      ? items.filter((i) => i.type === "slib_reminder")
-      : items;
-
   const viewTitle =
     view === "history" ? "History" : view === "commitments" ? "Commitments" : "Inbox";
   const viewSubtitle =
@@ -247,71 +244,86 @@ export default function App() {
             onRefresh={refresh}
           />
 
-          {view !== "history" && (
-            <div className="mb-8 grid grid-cols-3 gap-4">
-              <StatCard label="Emails processed" value={approved + rejected} />
-              <StatCard
-                label="Conflicts resolved"
-                value={
-                  (decisions?.decisions ?? []).filter(
-                    (d) => d.itemType === "conflict_resolution"
-                  ).length
-                }
-              />
-              <StatCard
-                label="Commitments tracked"
-                value={
-                  (decisions?.decisions ?? []).filter(
-                    (d) => d.itemType === "slib_reminder"
-                  ).length
-                }
-              />
-            </div>
+          {/* ── History view ───────────────────────────────────────────── */}
+          {view === "history" && (
+            <HistoryView data={decisions} loading={loading} />
           )}
 
-          {view === "history" ? (
-            <DecisionHistory data={decisions} loading={loading} />
-          ) : (
-            <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-              <section className="lg:col-span-2">
-                <ActionQueue
-                  items={queueItems}
-                  loading={loading}
-                  onApprove={approve}
-                  onReject={reject}
-                  onAskPulse={openChatWithContext}
-                />
-              </section>
+          {/* ── Commitments view ───────────────────────────────────────── */}
+          {view === "commitments" && (
+            <CommitmentsView
+              items={items.filter((i) => i.type === "slib_reminder")}
+              loading={loading}
+              onApprove={approve}
+              onReject={reject}
+              onAskPulse={openChatWithContext}
+            />
+          )}
 
-              {/* Collapsible Activity panel */}
-              <section className="lg:col-span-1">
-                <div className="mb-4 flex items-center justify-between">
-                  <h2 className="text-sm font-semibold text-gray-700">Activity</h2>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setView("history")}
-                      className="text-xs font-medium text-indigo-500 hover:text-indigo-700"
-                    >
-                      View all
-                    </button>
-                    <button
-                      onClick={() => setActivityCollapsed((v) => !v)}
-                      className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
-                      title={activityCollapsed ? "Expand" : "Collapse"}
-                    >
-                      {activityCollapsed ? (
-                        <ChevronDown size={14} />
-                      ) : (
-                        <ChevronUp size={14} />
-                      )}
-                    </button>
+          {/* ── Inbox view ─────────────────────────────────────────────── */}
+          {view === "queue" && (
+            <>
+              <div className="mb-8 grid grid-cols-3 gap-4">
+                <StatCard label="Emails processed" value={approved + rejected} />
+                <StatCard
+                  label="Conflicts resolved"
+                  value={
+                    (decisions?.decisions ?? []).filter(
+                      (d) => d.itemType === "conflict_resolution"
+                    ).length
+                  }
+                />
+                <StatCard
+                  label="Commitments tracked"
+                  value={
+                    (decisions?.decisions ?? []).filter(
+                      (d) => d.itemType === "slib_reminder"
+                    ).length
+                  }
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
+                <section className="lg:col-span-2">
+                  <ActionQueue
+                    items={items}
+                    loading={loading}
+                    onApprove={approve}
+                    onReject={reject}
+                    onAskPulse={openChatWithContext}
+                  />
+                </section>
+
+                {/* Collapsible Activity panel */}
+                <section className="lg:col-span-1">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h2 className="text-sm font-semibold text-gray-700">Activity</h2>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setView("history")}
+                        className="text-xs font-medium text-indigo-500 hover:text-indigo-700"
+                      >
+                        View all
+                      </button>
+                      <button
+                        onClick={() => setActivityCollapsed((v) => !v)}
+                        className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+                        title={activityCollapsed ? "Expand" : "Collapse"}
+                      >
+                        {activityCollapsed ? (
+                          <ChevronDown size={14} />
+                        ) : (
+                          <ChevronUp size={14} />
+                        )}
+                      </button>
+                    </div>
                   </div>
-                </div>
-                {!activityCollapsed && (
-                  <DecisionHistory data={decisions} loading={loading} compact />
-                )}
-              </section>
-            </div>
+                  {!activityCollapsed && (
+                    <DecisionHistory data={decisions} loading={loading} compact />
+                  )}
+                </section>
+              </div>
+            </>
           )}
 
           <footer className="mt-16 border-t border-gray-200 pt-6 text-center text-xs text-gray-400">
@@ -319,6 +331,17 @@ export default function App() {
           </footer>
         </main>
       </div>
+
+      {/* Floating chat button */}
+      {!drawerOpen && (
+        <button
+          onClick={() => setDrawerOpen(true)}
+          className="fixed bottom-6 right-6 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg transition-all hover:bg-indigo-700 hover:shadow-xl active:scale-95"
+          aria-label="Open Pulse chat"
+        >
+          <MessageSquare size={20} />
+        </button>
+      )}
 
       {/* Chat drawer */}
       <ChatDrawer
