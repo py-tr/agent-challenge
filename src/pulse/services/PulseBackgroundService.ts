@@ -322,6 +322,7 @@ export class PulseBackgroundService extends Service {
         }
 
         try {
+          console.log(`[Gmail] Inserting item: ${msg.subject}`);
           await insertActionItem(db, {
             type:     classification.actionItemType,
             title:    msg.subject,

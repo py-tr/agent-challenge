@@ -3,10 +3,15 @@
  * Provider — detects search intent in the user's message, fetches real-time
  * data, and injects it into the LLM context BEFORE the response is generated.
  *
- * Routing:
- *   Weather intent → wttr.in/{city}?format=j1 (JSON, today + tomorrow forecast)
- *   General intent → DDG Instant Answer API   (Wikipedia/factual data)
- *   No intent      → returns ""               (provider is skipped)
+ * Weather routing (tried in order, first success wins):
+ *   1. wttr.in/{city}?format=j1     — rich JSON, current + forecast
+ *   2. Open-Meteo geocoding + forecast API  — fallback, no API key
+ *
+ * General routing:
+ *   DDG Instant Answer API — Wikipedia/factual data
+ *
+ * On total failure: injects an explicit "unavailable" message so the LLM
+ * never hallucinates real-time data.
  */
 
 import type { Provider, ProviderResult, IAgentRuntime, Memory, State } from "@elizaos/core";
@@ -16,6 +21,9 @@ import type { Provider, ProviderResult, IAgentRuntime, Memory, State } from "@el
 const SEARCH_INTENT_RE = /weather|forecast|temperature|rain|sunny|snow|wind|humidity|search|find|look up|what is|who is|current|today|tomorrow|latest|news|price|check/i;
 
 const WEATHER_RE = /weather|forecast|temperature|rain|sunny|snow|wind|humidity/i;
+
+const SEARCH_UNAVAILABLE =
+  "Web search unavailable on this node. Queue data is available — ask about your pending items instead.";
 
 // ─── Cache ────────────────────────────────────────────────────────────────────
 
@@ -35,14 +43,15 @@ function setCached(key: string, result: string): void {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function timedFetch(url: string, init: RequestInit, ms = 6_000): Promise<Response> {
+const FETCH_TIMEOUT_MS = process.env.NODE_ENV === "production" ? 15_000 : 8_000;
+
+function timedFetch(url: string, init: RequestInit, ms = FETCH_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), ms);
   return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(id));
 }
 
 function extractCity(query: string): string {
-  // Try: "weather/forecast in/for/at <City> [tomorrow|today|?]"
   const match = query.match(
     /(?:in|for|at)\s+([A-Z][a-zA-Z\s]+?)(?:\s+tomorrow|\s+today|\s+this week|\?|$)/i
   );
@@ -54,7 +63,7 @@ function extractMessageText(message: Memory): string {
   return (message.content as { text?: string })?.text ?? "";
 }
 
-// ─── Weather fetch (wttr.in JSON) ─────────────────────────────────────────────
+// ─── Weather source 1: wttr.in ────────────────────────────────────────────────
 
 interface WttrHourly {
   weatherDesc: { value: string }[];
@@ -81,32 +90,26 @@ interface WttrResponse {
   nearest_area?: { areaName: { value: string }[]; country: { value: string }[] }[];
 }
 
-async function fetchWeather(query: string): Promise<string> {
-  const city = extractCity(query);
-  const url = `https://wttr.in/${encodeURIComponent(city)}?format=j1`;
+async function fetchWeatherWttr(city: string): Promise<string | null> {
   try {
-    const resp = await timedFetch(url, {
-      headers: { "User-Agent": "Pulse/1.0 ElizaOS-Agent", Accept: "application/json" },
-    });
-    if (!resp.ok) return `Weather data unavailable (HTTP ${resp.status}).`;
+    const resp = await timedFetch(
+      `https://wttr.in/${encodeURIComponent(city)}?format=j1`,
+      { headers: { "User-Agent": "Pulse/1.0 ElizaOS-Agent", Accept: "application/json" } }
+    );
+    if (!resp.ok) return null;
 
     const data = (await resp.json()) as WttrResponse;
-
     const area = data.nearest_area?.[0];
     const location = area
       ? `${area.areaName[0]?.value ?? city}, ${area.country[0]?.value ?? ""}`
       : city;
 
     const parts: string[] = [];
-
-    // Today (current conditions)
     const cur = data.current_condition?.[0];
     if (cur) {
       const desc = cur.weatherDesc[0]?.value ?? "";
       parts.push(`Current (${location}): ${desc}, ${cur.temp_C}°C (feels like ${cur.FeelsLikeC}°C)`);
     }
-
-    // Tomorrow (index 1)
     const tomorrow = data.weather?.[1];
     if (tomorrow) {
       const desc = tomorrow.hourly?.[4]?.weatherDesc?.[0]?.value
@@ -114,12 +117,95 @@ async function fetchWeather(query: string): Promise<string> {
         ?? "";
       parts.push(`Tomorrow: ${desc}, avg ${tomorrow.avgtempC}°C (high ${tomorrow.maxtempC}°C / low ${tomorrow.mintempC}°C)`);
     }
-
-    return parts.length > 0 ? parts.join(". ") : `No weather data for ${city}.`;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return `Weather fetch failed: ${msg}`;
+    return parts.length > 0 ? parts.join(". ") : null;
+  } catch {
+    return null;
   }
+}
+
+// ─── Weather source 2: Open-Meteo (geocoding + forecast) ─────────────────────
+
+interface GeoResult {
+  latitude: number;
+  longitude: number;
+  name: string;
+  country?: string;
+}
+
+interface GeoResponse {
+  results?: GeoResult[];
+}
+
+interface OpenMeteoResponse {
+  daily?: {
+    time: string[];
+    temperature_2m_max: (number | null)[];
+    temperature_2m_min: (number | null)[];
+    precipitation_probability_max: (number | null)[];
+  };
+}
+
+async function fetchWeatherOpenMeteo(city: string): Promise<string | null> {
+  try {
+    // Step 1: geocode city → lat/lon
+    const geoResp = await timedFetch(
+      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1`,
+      { headers: { Accept: "application/json" } }
+    );
+    if (!geoResp.ok) return null;
+
+    const geoData = (await geoResp.json()) as GeoResponse;
+    const loc = geoData.results?.[0];
+    if (!loc) return null;
+
+    const locationLabel = loc.country ? `${loc.name}, ${loc.country}` : loc.name;
+
+    // Step 2: fetch 2-day forecast
+    const params = new URLSearchParams({
+      latitude:  String(loc.latitude),
+      longitude: String(loc.longitude),
+      daily:     "temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+      timezone:  "auto",
+      forecast_days: "2",
+    });
+    const forecastResp = await timedFetch(
+      `https://api.open-meteo.com/v1/forecast?${params}`,
+      { headers: { Accept: "application/json" } }
+    );
+    if (!forecastResp.ok) return null;
+
+    const forecast = (await forecastResp.json()) as OpenMeteoResponse;
+    const daily = forecast.daily;
+    if (!daily?.time?.length) return null;
+
+    const parts: string[] = [];
+    for (let i = 0; i < Math.min(2, daily.time.length); i++) {
+      const label = i === 0 ? `Today (${locationLabel})` : "Tomorrow";
+      const max  = daily.temperature_2m_max[i];
+      const min  = daily.temperature_2m_min[i];
+      const rain = daily.precipitation_probability_max[i];
+      const tempStr = max != null && min != null ? `high ${max}°C / low ${min}°C` : "";
+      const rainStr = rain != null ? `, ${rain}% chance of rain` : "";
+      parts.push(`${label}: ${tempStr}${rainStr}`);
+    }
+    return parts.length > 0 ? parts.join(". ") : null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Weather: try wttr.in, fall back to Open-Meteo ───────────────────────────
+
+async function fetchWeather(query: string): Promise<string> {
+  const city = extractCity(query);
+
+  const wttr = await fetchWeatherWttr(city);
+  if (wttr) return wttr;
+
+  const openMeteo = await fetchWeatherOpenMeteo(city);
+  if (openMeteo) return openMeteo;
+
+  return SEARCH_UNAVAILABLE;
 }
 
 // ─── DDG Instant Answer fetch ─────────────────────────────────────────────────
@@ -137,7 +223,7 @@ async function fetchDdgInstant(query: string): Promise<string> {
     const resp = await timedFetch(`https://api.duckduckgo.com/?${params}`, {
       headers: { "User-Agent": "Pulse/1.0 ElizaOS-Agent", Accept: "application/json" },
     });
-    if (!resp.ok) return "No web results found.";
+    if (!resp.ok) return SEARCH_UNAVAILABLE;
 
     const data = (await resp.json()) as DdgResponse;
     if (data.Answer) return data.Answer;
@@ -145,9 +231,9 @@ async function fetchDdgInstant(query: string): Promise<string> {
       const src = data.AbstractSource ? ` (${data.AbstractSource})` : "";
       return `${data.Heading ? data.Heading + ": " : ""}${data.AbstractText}${src}`;
     }
-    return "No web results found.";
+    return SEARCH_UNAVAILABLE;
   } catch {
-    return "No web results found.";
+    return SEARCH_UNAVAILABLE;
   }
 }
 
@@ -157,7 +243,8 @@ export const webSearchProvider: Provider = {
   name: "REALTIME_WEB_DATA",
   description:
     "Fetches real-time web data (weather, facts, news) and injects it into the LLM context " +
-    "before the response is generated. Only activates when search intent is detected.",
+    "before the response is generated. Only activates when search intent is detected. " +
+    "Weather: tries wttr.in first, falls back to Open-Meteo. Failure is explicit — never silent.",
 
   get: async (
     _runtime: IAgentRuntime,
@@ -176,18 +263,13 @@ export const webSearchProvider: Provider = {
       return { text: `Real-time web data:\n${cached}\nUse this to answer accurately.` };
     }
 
-    let result: string;
-    if (WEATHER_RE.test(text)) {
-      result = await fetchWeather(text);
-    } else {
-      result = await fetchDdgInstant(text);
-    }
+    const result = WEATHER_RE.test(text)
+      ? await fetchWeather(text)
+      : await fetchDdgInstant(text);
 
-    if (!result || result === "No web results found.") {
-      return { text: "" };
-    }
-
+    // Always cache — including the unavailable message, to avoid hammering dead endpoints.
     setCached(cacheKey, result);
+
     return { text: `Real-time web data:\n${result}\nUse this to answer accurately.` };
   },
 };

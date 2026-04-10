@@ -205,6 +205,132 @@ async function mcpListMessages(
   }
 }
 
+// ─── Profile + History API ────────────────────────────────────────────────────
+
+export interface GmailProfile {
+  historyId: string;
+  emailAddress: string;
+}
+
+/** Fetch the user's current historyId (used to anchor incremental sync). */
+export async function getProfile(): Promise<GmailProfile> {
+  const token = await refreshAccessToken();
+  const resp = await fetch(`${GMAIL_BASE}/profile`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!resp.ok) throw new Error(`getProfile HTTP ${resp.status}`);
+  const data = (await resp.json()) as { historyId: string; emailAddress: string };
+  return { historyId: data.historyId, emailAddress: data.emailAddress };
+}
+
+export interface HistoryResult {
+  /** New messages added to INBOX since startHistoryId. */
+  messages: GmailMessage[];
+  /** Latest historyId — persist this as the new cursor. */
+  newHistoryId: string;
+}
+
+/**
+ * Thrown when startHistoryId is too old (Gmail keeps ~30 days of history).
+ * Caller should fall back to a full fetch and reset the cursor.
+ */
+export class HistoryExpiredError extends Error {
+  constructor(msg: string) { super(msg); this.name = "HistoryExpiredError"; }
+}
+
+/**
+ * Fetch only messages added to INBOX since startHistoryId.
+ * Returns an empty messages array (and updated historyId) when nothing is new.
+ */
+export async function listNewMessages(startHistoryId: string): Promise<HistoryResult> {
+  const token = await refreshAccessToken();
+
+  const params = new URLSearchParams({
+    startHistoryId,
+    historyTypes: "messageAdded",
+    labelId: "INBOX",
+  });
+
+  const resp = await fetch(`${GMAIL_BASE}/history?${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (resp.status === 404) {
+    throw new HistoryExpiredError(`historyId ${startHistoryId} is expired or invalid`);
+  }
+  if (!resp.ok) throw new Error(`history.list HTTP ${resp.status}`);
+
+  const data = (await resp.json()) as {
+    history?: Array<{
+      messagesAdded?: Array<{ message: { id: string; labelIds?: string[] } }>;
+    }>;
+    historyId: string;
+  };
+
+  // Collect unique INBOX message IDs from all history records.
+  const newIds = new Set<string>();
+  for (const record of data.history ?? []) {
+    for (const added of record.messagesAdded ?? []) {
+      const { id, labelIds } = added.message;
+      // Guard: only process if it landed in INBOX (some events lack labelIds).
+      if (!labelIds || labelIds.includes("INBOX")) {
+        newIds.add(id);
+      }
+    }
+  }
+
+  if (newIds.size === 0) {
+    return { messages: [], newHistoryId: data.historyId };
+  }
+
+  const messages = await fetchMessageMetadata(token, [...newIds]);
+  return { messages, newHistoryId: data.historyId };
+}
+
+// ─── Shared metadata fetcher (used by both list and history paths) ────────────
+
+async function fetchMessageMetadata(
+  token: string,
+  ids: string[]
+): Promise<GmailMessage[]> {
+  const results = await Promise.allSettled(
+    ids.map(async (id) => {
+      const resp = await fetch(
+        `${GMAIL_BASE}/messages/${id}` +
+          `?format=metadata` +
+          `&metadataHeaders=Subject` +
+          `&metadataHeaders=From` +
+          `&metadataHeaders=Date`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!resp.ok) throw new Error(`Message ${id} HTTP ${resp.status}`);
+
+      const msg = (await resp.json()) as {
+        id: string;
+        snippet: string;
+        payload: { headers: Array<{ name: string; value: string }> };
+      };
+
+      const h = (name: string) =>
+        msg.payload.headers.find(
+          (hdr) => hdr.name.toLowerCase() === name.toLowerCase()
+        )?.value ?? "";
+
+      return {
+        id:      msg.id,
+        subject: h("Subject") || "(no subject)",
+        from:    h("From"),
+        date:    h("Date"),
+        snippet: msg.snippet,
+      } satisfies GmailMessage;
+    })
+  );
+
+  return results
+    .filter((r): r is PromiseFulfilledResult<GmailMessage> => r.status === "fulfilled")
+    .map((r) => r.value);
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**

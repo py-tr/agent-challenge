@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { RefreshCw, AlertCircle, ChevronDown, ChevronUp, CheckCircle, XCircle, MessageSquare } from "lucide-react";
 import { useActionQueue } from "./hooks/useActionQueue";
-import { agentApi } from "./api/pulseApi";
+import { agentApi, pulseApi } from "./api/pulseApi";
 import { Sidebar, type SidebarView } from "./components/Sidebar";
 import { ActionQueue } from "./components/ActionQueue";
 import { HistoryView } from "./components/HistoryView";
@@ -13,7 +13,7 @@ import { ChatDrawer } from "./components/ChatDrawer";
 
 interface Toast {
   id: string;
-  type: "approved" | "rejected";
+  type: "approved" | "rejected" | "processed";
   leaving: boolean;
 }
 
@@ -27,15 +27,17 @@ function ToastContainer({ toasts }: { toasts: Toast[] }) {
           className={[
             "flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-lg text-white transition-all duration-300",
             t.leaving ? "opacity-0 translate-y-2" : "animate-toast-in",
-            t.type === "approved" ? "bg-green-600" : "bg-gray-700",
+            t.type === "approved" ? "bg-green-600" : t.type === "processed" ? "bg-indigo-600" : "bg-gray-700",
           ].join(" ")}
         >
           {t.type === "approved" ? (
             <CheckCircle size={15} />
+          ) : t.type === "processed" ? (
+            <RefreshCw size={15} />
           ) : (
             <XCircle size={15} />
           )}
-          {t.type === "approved" ? "Item approved" : "Item dismissed"}
+          {t.type === "approved" ? "Item approved" : t.type === "processed" ? "Inbox processed" : "Item dismissed"}
         </div>
       ))}
     </div>
@@ -45,7 +47,7 @@ function ToastContainer({ toasts }: { toasts: Toast[] }) {
 function useToasts() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const addToast = useCallback((type: "approved" | "rejected") => {
+  const addToast = useCallback((type: "approved" | "rejected" | "processed") => {
     const id = crypto.randomUUID();
     setToasts((prev) => [...prev, { id, type, leaving: false }]);
 
@@ -84,12 +86,16 @@ function TopBar({
   lastUpdated,
   error,
   onRefresh,
+  onProcessInbox,
+  processingInbox,
 }: {
   title: string;
   subtitle: string;
   lastUpdated: Date | null;
   error: string | null;
   onRefresh: () => void;
+  onProcessInbox?: () => void;
+  processingInbox?: boolean;
 }) {
   return (
     <div className="mb-6">
@@ -103,6 +109,17 @@ function TopBar({
             <span className="text-xs text-gray-400">
               {timeAgo(lastUpdated.toISOString())}
             </span>
+          )}
+          {onProcessInbox && (
+            <button
+              onClick={onProcessInbox}
+              disabled={processingInbox}
+              title="Fetch new emails and add action items to your queue"
+              className="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-600 transition-colors hover:border-indigo-300 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+            >
+              <RefreshCw size={12} className={processingInbox ? "animate-spin" : ""} />
+              {processingInbox ? "Processing…" : "Process Inbox"}
+            </button>
           )}
           <button
             onClick={onRefresh}
@@ -139,6 +156,7 @@ function timeAgo(iso: string): string {
 export default function App() {
   const [view, setView] = useState<SidebarView>("queue");
   const [activityCollapsed, setActivityCollapsed] = useState(false);
+  const [processingInbox, setProcessingInbox] = useState(false);
 
   // Chat drawer
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -147,6 +165,9 @@ export default function App() {
 
   // Toasts
   const { toasts, addToast } = useToasts();
+
+  // Defined after useActionQueue below — hoisted via ref to avoid dependency ordering issues.
+  const refreshRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     agentApi.fetchAgentId().then(setAgentId).catch(() => {
@@ -176,6 +197,22 @@ export default function App() {
     reject: _reject,
     refresh,
   } = useActionQueue();
+
+  // Keep refreshRef current so handleProcessInbox can call it without stale closure.
+  refreshRef.current = refresh;
+
+  const handleProcessInbox = useCallback(async () => {
+    setProcessingInbox(true);
+    try {
+      await pulseApi.processInbox();
+      addToast("processed");
+      refreshRef.current?.();
+    } catch {
+      // error will surface via the queue error banner on next poll
+    } finally {
+      setProcessingInbox(false);
+    }
+  }, [addToast]);
 
   // Wrap approve/reject to fire toasts
   const approve = useCallback(
@@ -242,6 +279,8 @@ export default function App() {
             lastUpdated={lastUpdated}
             error={error}
             onRefresh={refresh}
+            onProcessInbox={view === "queue" ? handleProcessInbox : undefined}
+            processingInbox={processingInbox}
           />
 
           {/* ── History view ───────────────────────────────────────────── */}

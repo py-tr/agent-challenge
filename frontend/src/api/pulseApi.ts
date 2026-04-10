@@ -97,6 +97,12 @@ export const pulseApi = {
       `/pulse/reject/${id}`,
       { method: "POST", body: JSON.stringify({ reason: reason ?? null }) }
     ),
+
+  processInbox: () =>
+    request<{ success: boolean; processed: number; inserted: number }>(
+      `/pulse/process`,
+      { method: "POST" }
+    ),
 };
 
 // ─── ElizaOS agent / sessions API ────────────────────────────────────────────

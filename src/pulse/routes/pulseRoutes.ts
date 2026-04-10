@@ -33,6 +33,7 @@ import {
   getActionItem,
   setActionItemStatus,
   insertDecision,
+  insertActionItem,
   getDecisions,
   countByStatus,
   countDecisions,
@@ -387,6 +388,73 @@ export const pulseRoutes: Route[] = [
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         console.error(`[Pulse:Routes] GET /pulse/status: ${msg}`);
+        err(res, msg);
+      }
+    },
+  },
+
+  // ── POST /pulse/process ───────────────────────────────────────────────────
+  // Manually trigger inbox processing: fetch + classify emails, insert action
+  // items for anything that needs a decision. Called by the "Process Inbox"
+  // button in the dashboard.
+  {
+    type: "POST",
+    path: "/process",
+    handler: async (
+      _req: RouteRequest,
+      res: RouteResponse,
+      runtime: IAgentRuntime
+    ) => {
+      try {
+        const gmailSvc = runtime.getService(
+          GmailMcpService.serviceType
+        ) as GmailMcpService | null;
+
+        if (!gmailSvc) {
+          err(res, "GmailMcpService not available", 503);
+          return;
+        }
+
+        console.log("[Pulse:Routes] POST /pulse/process — fetching and classifying inbox…");
+        const classified = await gmailSvc.fetchAndClassify();
+
+        if (classified.length === 0) {
+          console.log("[Pulse:Routes] /process — no new emails to process.");
+          ok(res, { success: true, processed: 0, inserted: 0 });
+          return;
+        }
+
+        const db = runtime.db as unknown as Db;
+        let inserted = 0;
+
+        for (const { message: msg, classification } of classified) {
+          if (!classification.actionItemType) continue;
+          try {
+            console.log(`[Gmail] Inserting item: ${msg.subject}`);
+            await insertActionItem(db, {
+              type:     classification.actionItemType,
+              title:    msg.subject,
+              body:     classification.body,
+              metadata: {
+                gmailMessageId: msg.id,
+                from:           msg.from,
+                date:           msg.date,
+                category:       classification.category,
+              },
+              priority: classification.priority,
+            });
+            inserted++;
+          } catch (insertErr) {
+            const insertMsg = insertErr instanceof Error ? insertErr.message : String(insertErr);
+            console.error(`[Pulse:Routes] Failed to insert item for "${msg.subject}": ${insertMsg}`);
+          }
+        }
+
+        console.log(`[Pulse:Routes] /process complete — ${classified.length} classified, ${inserted} inserted.`);
+        ok(res, { success: true, processed: classified.length, inserted });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[Pulse:Routes] POST /pulse/process: ${msg}`);
         err(res, msg);
       }
     },

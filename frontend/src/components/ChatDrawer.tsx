@@ -144,7 +144,7 @@ export function ChatDrawer({
       const controller = new AbortController();
       abortRef.current = controller;
 
-      // 30s timeout — abort and show a timeout message
+      // 120s timeout — email processing can take 60-90s on Nosana nodes
       timeoutRef.current = setTimeout(() => {
         if (abortRef.current === controller) {
           controller.abort();
@@ -152,10 +152,10 @@ export function ChatDrawer({
           setIsLoading(false);
           setMessages((prev) => [
             ...prev,
-            { role: "agent", text: "No response after 30s. Try again.", ts: new Date() },
+            { role: "agent", text: "No response after 120s. The agent may still be processing — check your queue.", ts: new Date() },
           ]);
         }
-      }, 30_000);
+      }, 120_000);
 
       try {
         // Lazily create session if needed

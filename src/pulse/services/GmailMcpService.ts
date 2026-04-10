@@ -5,10 +5,10 @@
  *   1. Token refresh heartbeat — calls refreshAccessToken() every 30 minutes
  *      so the OAuth token never expires between processing cycles.
  *
- *   2. Fetch + classify emails — fetches the inbox via gmailClient,
- *      classifies each message via emailClassifier, caches the raw messages
- *      in PGLite (via runtime.setCache), and returns classified results
- *      with a skipped-IDs dedup guard.
+ *   2. Fetch + classify emails — on first run does a full inbox fetch and
+ *      stores the Gmail historyId as a cursor. Subsequent runs call
+ *      history.list(startHistoryId) to get only new messages since the last
+ *      sync, eliminating the need for a processed-IDs dedup set.
  *
  * PGLite Migrations:
  *   Tables are created on first start by calling runMigrations(runtime.db).
@@ -22,7 +22,13 @@
 
 import { Service } from "@elizaos/core";
 import type { IAgentRuntime } from "@elizaos/core";
-import { listMessages, refreshAccessToken } from "../lib/gmailClient.js";
+import {
+  listMessages,
+  refreshAccessToken,
+  getProfile,
+  listNewMessages,
+  HistoryExpiredError,
+} from "../lib/gmailClient.js";
 import type { GmailMessage } from "../lib/gmailClient.js";
 import {
   classifyEmail,
@@ -46,10 +52,9 @@ interface GmailCache {
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
-const CACHE_KEY = "pulse:gmail:last_fetch";
-const PROCESSED_IDS_KEY = "pulse:gmail:processed_ids";
+const CACHE_KEY        = "pulse:gmail:last_fetch";
+const HISTORY_ID_KEY   = "pulse:gmail:last_history_id";
 const TOKEN_REFRESH_INTERVAL_MS = 30 * 60 * 1000; // 30 min
-const MAX_PROCESSED_ID_HISTORY = 200; // keep last 200 processed IDs
 
 export class GmailMcpService extends Service {
   static readonly serviceType = "pulse-gmail";
@@ -86,27 +91,21 @@ export class GmailMcpService extends Service {
   // ─── Startup ────────────────────────────────────────────────────────────────
 
   private async onStart(): Promise<void> {
-    // Ensure Pulse tables exist in the runtime's shared PGLite database.
-    // runtime.db is the Drizzle-over-PGLite instance registered by plugin-sql.
-    // Casting to Db is safe: same underlying class, schema type is erased at runtime.
     try {
       const db = this.runtime.db as unknown as Db;
       await runMigrations(db);
       console.log("[Pulse:GmailMcpService] DB migrations verified.");
     } catch (err) {
-      // Non-fatal: tables might already exist from a prior standalone run.
       console.warn(
         "[Pulse:GmailMcpService] Migration warning:",
         err instanceof Error ? err.message : String(err)
       );
     }
 
-    // Kick off an initial token refresh (fire-and-forget — no env vars → silent fail).
     void refreshAccessToken().catch(() => {
       /* no-op: env vars not set in dev */
     });
 
-    // Heartbeat: keep the access token alive.
     this.refreshInterval = setInterval(() => {
       void refreshAccessToken().catch((err) => {
         console.warn(
@@ -124,42 +123,78 @@ export class GmailMcpService extends Service {
   // ─── Public API ─────────────────────────────────────────────────────────────
 
   /**
-   * Fetch inbox, classify each message, cache raw messages, return only
-   * new (not-yet-processed) messages with a non-null actionItemType.
+   * Fetch and classify inbox messages using Gmail's incremental History API.
    *
-   * Falls back to cached messages if the network call fails.
+   * First call: full inbox fetch (up to maxMessages), store historyId cursor.
+   * Subsequent calls: history.list(lastHistoryId) — only new messages since
+   *   the last sync. On HistoryExpiredError (cursor >30 days old), falls back
+   *   to a full fetch and resets the cursor.
    */
   async fetchAndClassify(maxMessages = 20): Promise<ClassifiedEmail[]> {
-    const messages = await this.getMessages(maxMessages);
-    if (messages.length === 0) return [];
+    const storedHistoryId = await this.runtime.getCache<string>(HISTORY_ID_KEY);
 
-    // Load the set of already-processed Gmail message IDs.
-    const processedIds = await this.getProcessedIds();
+    let messages: GmailMessage[];
+    let newHistoryId: string;
 
-    const results: ClassifiedEmail[] = [];
-    const newlyProcessedIds: string[] = [];
+    if (!storedHistoryId) {
+      // ── Initial full fetch ───────────────────────────────────────────────
+      console.log("[Gmail] No history cursor — performing initial full fetch.");
+      messages = await this.fullFetch(maxMessages);
+      if (messages.length === 0) return [];
 
-    for (const msg of messages) {
-      // Skip messages already in the queue to prevent duplicates on re-runs.
-      if (processedIds.has(msg.id)) continue;
-
-      const classification = await classifyEmail(this.runtime, msg);
-
-      // Only return messages that need an action item (skip noise/commitment).
-      if (classification.actionItemType !== null) {
-        results.push({ message: msg, classification });
+      // Anchor the cursor at the current historyId so the next call is incremental.
+      try {
+        const profile = await getProfile();
+        newHistoryId = profile.historyId;
+        console.log(`[Gmail] Anchoring history cursor at historyId=${newHistoryId}`);
+      } catch (err) {
+        console.warn(
+          "[Gmail] Could not fetch profile for historyId anchor:",
+          err instanceof Error ? err.message : String(err)
+        );
+        // Classify what we have even if we can't store a cursor.
+        return this.classifyMessages(messages);
       }
-
-      // Mark as processed regardless of category — even noise shouldn't re-appear.
-      newlyProcessedIds.push(msg.id);
+    } else {
+      // ── Incremental fetch via History API ────────────────────────────────
+      console.log(`[Gmail] Fetching history since historyId=${storedHistoryId}`);
+      try {
+        const result = await listNewMessages(storedHistoryId);
+        messages = result.messages;
+        newHistoryId = result.newHistoryId;
+        console.log(
+          `[Gmail] History returned ${messages.length} new message(s). ` +
+          `New historyId=${newHistoryId}`
+        );
+      } catch (err) {
+        if (err instanceof HistoryExpiredError) {
+          console.warn("[Gmail] History cursor expired — falling back to full fetch.");
+          messages = await this.fullFetch(maxMessages);
+          if (messages.length === 0) {
+            // Still update cursor so next call doesn't re-expire immediately.
+            try {
+              const profile = await getProfile();
+              await this.runtime.setCache(HISTORY_ID_KEY, profile.historyId);
+            } catch { /* ignore */ }
+            return [];
+          }
+          try {
+            const profile = await getProfile();
+            newHistoryId = profile.historyId;
+          } catch {
+            return this.classifyMessages(messages);
+          }
+        } else {
+          throw err;
+        }
+      }
     }
 
-    // Persist updated processed IDs set.
-    if (newlyProcessedIds.length > 0) {
-      await this.appendProcessedIds(processedIds, newlyProcessedIds);
-    }
+    // Persist the updated history cursor.
+    await this.runtime.setCache(HISTORY_ID_KEY, newHistoryId);
 
-    return results;
+    if (messages.length === 0) return [];
+    return this.classifyMessages(messages);
   }
 
   /**
@@ -177,12 +212,11 @@ export class GmailMcpService extends Service {
 
   // ─── Private Helpers ────────────────────────────────────────────────────────
 
-  /** Fetch from Gmail or fall back to the PGLite cache. */
-  private async getMessages(maxMessages: number): Promise<GmailMessage[]> {
+  /** Full inbox fetch — used for first sync and expired-cursor recovery. */
+  private async fullFetch(maxMessages: number): Promise<GmailMessage[]> {
     const result = await listMessages(maxMessages);
 
     if (result.messages.length > 0) {
-      // Cache fresh messages for offline fallback.
       const cache: GmailCache = {
         messages: result.messages,
         path: result.path,
@@ -212,20 +246,17 @@ export class GmailMcpService extends Service {
     return [];
   }
 
-  /** Load the set of already-processed Gmail message IDs from cache. */
-  private async getProcessedIds(): Promise<Set<string>> {
-    const ids = await this.runtime.getCache<string[]>(PROCESSED_IDS_KEY);
-    return new Set(ids ?? []);
-  }
+  /** Classify a list of messages and return only those needing an action item. */
+  private async classifyMessages(messages: GmailMessage[]): Promise<ClassifiedEmail[]> {
+    const results: ClassifiedEmail[] = [];
 
-  /** Append newly processed IDs to the persisted set, capped at MAX history. */
-  private async appendProcessedIds(
-    existing: Set<string>,
-    toAdd: string[]
-  ): Promise<void> {
-    const merged = [...existing, ...toAdd];
-    // Keep only the most recent MAX_PROCESSED_ID_HISTORY IDs to bound storage.
-    const capped = merged.slice(-MAX_PROCESSED_ID_HISTORY);
-    await this.runtime.setCache<string[]>(PROCESSED_IDS_KEY, capped);
+    for (const msg of messages) {
+      const classification = await classifyEmail(this.runtime, msg);
+      if (classification.actionItemType !== null) {
+        results.push({ message: msg, classification });
+      }
+    }
+
+    return results;
   }
 }
