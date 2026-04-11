@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { RefreshCw, AlertCircle, ChevronDown, ChevronUp, CheckCircle, XCircle, MessageSquare, Undo2, Maximize2 } from "lucide-react";
+import { RefreshCw, AlertCircle, ChevronDown, ChevronUp, CheckCircle, MessageSquare, Maximize2 } from "lucide-react";
 import { useActionQueue } from "./hooks/useActionQueue";
-import { agentApi, pulseApi, type ActionItem, type EmailDraftContext, type BriefingData } from "./api/pulseApi";
+import { agentApi, pulseApi, type ActionItem, type EmailDraftContext, type BriefingData, type ConflictContext } from "./api/pulseApi";
 import { Sidebar, type SidebarView } from "./components/Sidebar";
 import { ActionQueue } from "./components/ActionQueue";
 import { HistoryView } from "./components/HistoryView";
@@ -15,14 +15,12 @@ import { FocusMode } from "./components/FocusMode";
 
 interface Toast {
   id: string;
-  type: "approved" | "rejected" | "processed" | "draft_queued";
+  type: "processed" | "draft_queued" | "info";
   message?: string;
   leaving: boolean;
-  /** When set, shows an Undo button. Clicking it calls this function. */
-  onUndo?: () => void;
 }
 
-function ToastContainer({ toasts, onUndo }: { toasts: Toast[]; onUndo: (id: string) => void }) {
+function ToastContainer({ toasts }: { toasts: Toast[] }) {
   if (toasts.length === 0) return null;
   return (
     <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 pointer-events-none">
@@ -32,35 +30,22 @@ function ToastContainer({ toasts, onUndo }: { toasts: Toast[]; onUndo: (id: stri
           className={[
             "pointer-events-auto flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-lg text-white transition-all duration-300",
             t.leaving ? "opacity-0 translate-y-2" : "animate-toast-in",
-            t.type === "approved" ? "bg-green-600"
-            : t.type === "processed" ? "bg-indigo-600"
+            t.type === "processed" ? "bg-indigo-600"
             : t.type === "draft_queued" ? "bg-blue-600"
             : "bg-gray-700",
           ].join(" ")}
         >
-          {t.type === "approved" ? (
-            <CheckCircle size={15} />
-          ) : t.type === "processed" ? (
+          {t.type === "processed" ? (
             <RefreshCw size={15} />
           ) : t.type === "draft_queued" ? (
             <MessageSquare size={15} />
           ) : (
-            <XCircle size={15} />
+            <CheckCircle size={15} />
           )}
           {t.message ?? (
-            t.type === "approved" ? "Item approved"
-            : t.type === "processed" ? "Inbox processed"
+            t.type === "processed" ? "Inbox processed"
             : t.type === "draft_queued" ? "Draft email queued"
-            : "Item dismissed"
-          )}
-          {t.onUndo && (
-            <button
-              onClick={() => onUndo(t.id)}
-              className="ml-1 flex items-center gap-1 rounded border border-white/30 bg-white/10 px-2 py-0.5 text-xs font-semibold hover:bg-white/20 transition-colors"
-            >
-              <Undo2 size={11} />
-              Undo
-            </button>
+            : "Done"
           )}
         </div>
       ))}
@@ -73,41 +58,33 @@ const UNDO_DELAY_MS = 3_000;
 
 function useToasts() {
   const [toasts, setToasts] = useState<Toast[]>([]);
-  // Maps toast id → cancel-timer function
-  const undoTimers = useRef<Map<string, (() => void)>>(new Map());
 
   const addToast = useCallback((
-    type: "approved" | "rejected" | "processed" | "draft_queued",
+    type: "processed" | "draft_queued" | "info",
     message?: string,
-    onUndo?: () => void
   ) => {
     const id = crypto.randomUUID();
-    setToasts((prev) => [...prev, { id, type, message, leaving: false, onUndo }]);
+    setToasts((prev) => [...prev, { id, type, message, leaving: false }]);
 
-    const fadeTimer = setTimeout(() => {
+    setTimeout(() => {
       setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
-    }, onUndo ? UNDO_DELAY_MS + 300 : 1700);
+    }, 1_700);
 
-    const removeTimer = setTimeout(() => {
+    setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-      undoTimers.current.delete(id);
-    }, onUndo ? UNDO_DELAY_MS + 600 : 2000);
-
-    undoTimers.current.set(id, () => {
-      clearTimeout(fadeTimer);
-      clearTimeout(removeTimer);
-    });
+    }, 2_000);
 
     return id;
   }, []);
 
-  const removeToast = useCallback((id: string) => {
-    undoTimers.current.get(id)?.();
-    undoTimers.current.delete(id);
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  }, []);
+  return { toasts, addToast };
+}
 
-  return { toasts, addToast, removeToast };
+// ─── Undo state ───────────────────────────────────────────────────────────────
+
+export interface UndoEntry {
+  type: "approved" | "rejected" | "dismissed";
+  startedAt: number;
 }
 
 // ─── Stats row ────────────────────────────────────────────────────────────────
@@ -210,11 +187,18 @@ export default function App() {
   const [pendingAutoSend, setPendingAutoSend] = useState<string | null>(null);
   const [agentId, setAgentId] = useState<string | null>(null);
   const [activeEmailDraft, setActiveEmailDraft] = useState<EmailDraftContext | null>(null);
+  const [activeConflictContext, setActiveConflictContext] = useState<ConflictContext | null>(null);
 
-  const { toasts, addToast, removeToast } = useToasts();
+  const { toasts, addToast } = useToasts();
 
-  // Pending undo timers: itemId → { cancelApiFn, toastId }
-  const undoPending = useRef<Map<string, { cancel: () => void; toastId: string }>>(new Map());
+  // IDs that have been optimistically hidden after the undo window expires.
+  const [hiddenItemIds, setHiddenItemIds] = useState<Set<string>>(new Set());
+
+  // In-card undo state: items currently showing the undo overlay.
+  const [undoStates, setUndoStates] = useState<Map<string, UndoEntry>>(new Map());
+
+  // Pending undo timers: itemId → cancel function
+  const undoPending = useRef<Map<string, { cancel: () => void }>>(new Map());
 
   const refreshRef = useRef<(() => void) | null>(null);
 
@@ -231,15 +215,34 @@ export default function App() {
       .finally(() => setBriefingLoading(false));
   }, []);
 
-  function openChatWithContext(title: string, body: string) {
-    const snippet = body
+  function openChatWithContext(item: ActionItem) {
+    const snippet = item.body
       .replace(/\*\*(.+?)\*\*/g, "$1")
       .split("\n")
       .find((l) => l.trim().length > 0)
       ?.trim()
       .slice(0, 100) ?? "";
-    setPendingAutoSend(`I need help with this item: "${title}". ${snippet}`);
+    setPendingAutoSend(`I need help with this item: "${item.title}". ${snippet}`);
     setActiveEmailDraft(null);
+
+    if (item.type === "conflict_resolution") {
+      const m = item.metadata as Record<string, unknown> | null;
+      setActiveConflictContext({
+        itemId:      item.id,
+        eventAId:    m?.eventAId    as string | undefined,
+        eventBId:    m?.eventBId    as string | undefined,
+        eventATitle: (m?.eventATitle as string | undefined) ?? "Event A",
+        eventBTitle: (m?.eventBTitle as string | undefined) ?? "Event B",
+        eventAStart: m?.eventAStart as string | undefined,
+        eventAEnd:   m?.eventAEnd   as string | undefined,
+        eventBStart: m?.eventBStart as string | undefined,
+        eventBEnd:   m?.eventBEnd   as string | undefined,
+        date:        m?.date        as string | undefined,
+      });
+    } else {
+      setActiveConflictContext(null);
+    }
+
     setDrawerOpen(true);
   }
 
@@ -350,23 +353,38 @@ export default function App() {
     }
   }, [addToast]);
 
+  // ─── Undo handler ────────────────────────────────────────────────────────────
+  const handleUndo = useCallback((id: string) => {
+    const entry = undoPending.current.get(id);
+    if (entry) {
+      entry.cancel();
+      undoPending.current.delete(id);
+    }
+    setUndoStates((prev) => { const m = new Map(prev); m.delete(id); return m; });
+    // Restore item if it was already hidden (edge case: timer fired just as user clicked)
+    setHiddenItemIds((prev) => { const s = new Set(prev); s.delete(id); return s; });
+  }, []);
+
   // ─── Undo-aware approve ─────────────────────────────────────────────────────
   const approve = useCallback(
     async (id: string) => {
-      // If there's already a pending undo for this item, cancel it first
+      // Cancel any existing undo for this item
       const existing = undoPending.current.get(id);
       if (existing) {
         existing.cancel();
         undoPending.current.delete(id);
-        removeToast(existing.toastId);
       }
 
-      // Optimistically remove the item from view immediately (the card exits).
-      // The actual API call is deferred by UNDO_DELAY_MS.
+      // Show in-card undo overlay
+      setUndoStates((prev) => new Map(prev).set(id, { type: "approved", startedAt: Date.now() }));
+
       let cancelled = false;
       const timer = setTimeout(async () => {
         if (cancelled) return;
         undoPending.current.delete(id);
+        // Card disappears: hide + remove undo overlay
+        setHiddenItemIds((prev) => new Set(prev).add(id));
+        setUndoStates((prev) => { const m = new Map(prev); m.delete(id); return m; });
         try {
           const result = await _approve(id);
           if (result.draftCreated) {
@@ -378,88 +396,68 @@ export default function App() {
             addToast("draft_queued", `Draft email queued for ${firstName}`);
             setTimeout(() => refreshRef.current?.(), 1_000);
           }
-          // Refresh to sync any server-side changes
           refreshRef.current?.();
         } catch {
-          // Error will surface on next poll
+          // Restore on error so the item reappears
+          setHiddenItemIds((prev) => { const s = new Set(prev); s.delete(id); return s; });
         }
       }, UNDO_DELAY_MS);
 
-      const undoFn = () => {
-        cancelled = true;
-        clearTimeout(timer);
-        // Refresh so the item reappears in the queue
-        refreshRef.current?.();
-      };
-
-      const toastId = addToast("approved", "Item approved", undoFn) as string;
-      undoPending.current.set(id, { cancel: () => { cancelled = true; clearTimeout(timer); }, toastId });
+      undoPending.current.set(id, { cancel: () => { cancelled = true; clearTimeout(timer); } });
     },
-    [_approve, addToast, removeToast]
+    [_approve, addToast]
   );
 
   // ─── Undo-aware reject ──────────────────────────────────────────────────────
   const reject = useCallback(
     async (id: string, reason?: string) => {
+      setUndoStates((prev) => new Map(prev).set(id, { type: "rejected", startedAt: Date.now() }));
       let cancelled = false;
       const timer = setTimeout(async () => {
         if (cancelled) return;
         undoPending.current.delete(id);
-        try { await _reject(id, reason); } catch {}
+        setHiddenItemIds((prev) => new Set(prev).add(id));
+        setUndoStates((prev) => { const m = new Map(prev); m.delete(id); return m; });
+        try { await _reject(id, reason); } catch {
+          setHiddenItemIds((prev) => { const s = new Set(prev); s.delete(id); return s; });
+        }
         refreshRef.current?.();
       }, UNDO_DELAY_MS);
 
-      const undoFn = () => {
-        cancelled = true;
-        clearTimeout(timer);
-        refreshRef.current?.();
-      };
-
-      const toastId = addToast("rejected", "Item rejected", undoFn) as string;
-      undoPending.current.set(id, { cancel: () => { cancelled = true; clearTimeout(timer); }, toastId });
+      undoPending.current.set(id, { cancel: () => { cancelled = true; clearTimeout(timer); } });
     },
-    [_reject, addToast]
+    [_reject]
   );
 
   // ─── Dismiss (Skip without rejecting) ──────────────────────────────────────
   const dismiss = useCallback(
     async (id: string) => {
+      setUndoStates((prev) => new Map(prev).set(id, { type: "dismissed", startedAt: Date.now() }));
       let cancelled = false;
       const timer = setTimeout(async () => {
         if (cancelled) return;
         undoPending.current.delete(id);
-        try { await pulseApi.dismiss(id); } catch {}
+        setHiddenItemIds((prev) => new Set(prev).add(id));
+        setUndoStates((prev) => { const m = new Map(prev); m.delete(id); return m; });
+        try { await pulseApi.dismiss(id); } catch {
+          setHiddenItemIds((prev) => { const s = new Set(prev); s.delete(id); return s; });
+        }
         refreshRef.current?.();
       }, UNDO_DELAY_MS);
 
-      const undoFn = () => {
-        cancelled = true;
-        clearTimeout(timer);
-        refreshRef.current?.();
-      };
-
-      const toastId = addToast("rejected", "Item skipped", undoFn) as string;
-      undoPending.current.set(id, { cancel: () => { cancelled = true; clearTimeout(timer); }, toastId });
+      undoPending.current.set(id, { cancel: () => { cancelled = true; clearTimeout(timer); } });
     },
-    [addToast]
+    []
   );
 
-  const handleUndoToast = useCallback((toastId: string) => {
-    // Find the pending undo entry with this toast id
-    for (const [, entry] of undoPending.current.entries()) {
-      if (entry.toastId === toastId) {
-        entry.cancel();
-      }
-    }
-    removeToast(toastId);
-    // Refresh after a short delay to let the cancel propagate
-    setTimeout(() => refreshRef.current?.(), 50);
-  }, [removeToast]);
+  // Filter out items that are permanently hidden (undo window expired + API called).
+  // Items in undoStates are still visible (showing the undo overlay).
+  const visibleItems = items.filter((i) => !hiddenItemIds.has(i.id));
 
   const pending      = status?.queue.pending ?? 0;
   const approved     = status?.queue.approved ?? 0;
   const rejected     = status?.queue.rejected ?? 0;
-  const committedCount = items.filter((i) => i.type === "slib_reminder").length;
+  const committedCount = visibleItems.filter((i) => i.type === "slib_reminder").length;
 
   // Stat card: only count email_draft decisions as "emails sent"
   const emailsSent = (decisions?.decisions ?? []).filter(
@@ -473,13 +471,17 @@ export default function App() {
   ).length;
 
   // Proactive chat context: first pending item for welcome message
-  const firstPendingItem = items.find((i) => i.status === "pending");
+  const firstPendingItem = visibleItems.find((i) => i.status === "pending");
 
   useEffect(() => {
     document.title = pending > 0
       ? `Pulse (${pending}) — Chief of Staff`
       : "Pulse — Chief of Staff";
   }, [pending]);
+
+  // Suppress unused-variable warnings for approved/rejected counts used in status bar
+  void approved;
+  void rejected;
 
   const viewTitle =
     view === "history" ? "History" : view === "commitments" ? "Commitments" : "Inbox";
@@ -533,7 +535,7 @@ export default function App() {
 
           {view === "commitments" && (
             <CommitmentsView
-              items={items.filter((i) => i.type === "slib_reminder")}
+              items={visibleItems.filter((i) => i.type === "slib_reminder")}
               loading={loading}
               onApprove={approve}
               onReject={reject}
@@ -559,7 +561,7 @@ export default function App() {
 
               {focusMode ? (
                 <FocusMode
-                  items={items.filter((i) => i.status === "pending")}
+                  items={visibleItems.filter((i) => i.status === "pending")}
                   onExit={() => setFocusMode(false)}
                   onApprove={approve}
                   onReject={reject}
@@ -584,13 +586,15 @@ export default function App() {
                       </div>
                     )}
                     <ActionQueue
-                      items={items}
+                      items={visibleItems}
                       loading={loading}
                       onApprove={approve}
                       onReject={reject}
                       onDismiss={dismiss}
                       onAskPulse={openChatWithContext}
                       onEmailReview={openEmailDraft}
+                      undoStates={undoStates}
+                      onUndo={handleUndo}
                     />
                   </section>
 
@@ -645,14 +649,15 @@ export default function App() {
       <ChatDrawer
         key={activeEmailDraft ? `draft-${activeEmailDraft.itemId}` : "chat"}
         isOpen={drawerOpen}
-        onClose={() => { setDrawerOpen(false); setActiveEmailDraft(null); }}
+        onClose={() => { setDrawerOpen(false); setActiveEmailDraft(null); setActiveConflictContext(null); }}
         agentId={agentId}
         autoSendText={pendingAutoSend}
         onAutoSendConsumed={() => setPendingAutoSend(null)}
         emailDraft={activeEmailDraft}
+        conflictContext={activeConflictContext}
         onEmailSent={() => {
           refresh();
-          addToast("approved", "Email sent");
+          addToast("info", "Email sent");
         }}
         onQueueRefresh={refresh}
         userDisplayName={status?.userDisplayName}
@@ -660,7 +665,7 @@ export default function App() {
         firstPendingTitle={firstPendingItem?.title}
       />
 
-      <ToastContainer toasts={toasts} onUndo={handleUndoToast} />
+      <ToastContainer toasts={toasts} />
     </div>
   );
 }

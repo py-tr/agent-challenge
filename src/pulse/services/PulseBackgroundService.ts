@@ -411,12 +411,16 @@ export class PulseBackgroundService extends Service {
             title,
             body,
             metadata: {
-              eventAId:      eventA.id,
-              eventBId:      eventB.id,
-              eventATitle:   eventA.title,
-              eventBTitle:   eventB.title,
+              eventAId:    eventA.id,
+              eventBId:    eventB.id,
+              eventATitle: eventA.title,
+              eventBTitle: eventB.title,
+              eventAStart: eventA.start,
+              eventAEnd:   eventA.end,
+              eventBStart: eventB.start,
+              eventBEnd:   eventB.end,
               overlapMinutes,
-              date:          dateStr,
+              date:        dateStr,
             },
             priority: 1, // Highest — conflicts surface above all other items
           });

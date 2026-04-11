@@ -107,7 +107,7 @@ interface Props {
   onApprove: (id: string) => Promise<void>;
   onReject: (id: string, reason?: string) => Promise<void>;
   onDismiss?: (id: string) => Promise<void>;
-  onAskPulse?: (title: string, body: string) => void;
+  onAskPulse?: (item: ActionItem) => void;
   onEmailReview?: (item: ActionItem) => void;
 }
 
@@ -368,7 +368,7 @@ export function FocusMode({
           <div className="flex items-center gap-2">
             {onAskPulse && !showRejectInput && (
               <button
-                onClick={() => onAskPulse(item.title, item.body)}
+                onClick={() => onAskPulse(item)}
                 disabled={busy}
                 className="flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-white px-4 py-2 text-sm font-medium text-indigo-600 transition-colors hover:bg-indigo-50 disabled:opacity-50"
               >

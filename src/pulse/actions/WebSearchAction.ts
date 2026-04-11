@@ -71,8 +71,9 @@ interface WttrResponse {
 }
 
 function extractCity(query: string): string {
+  // Stop at comma/punctuation so "in Prague, and tell me..." extracts just "Prague"
   const match = query.match(
-    /(?:in|for|at)\s+([A-Z][a-zA-Z\s]+?)(?:\s+tomorrow|\s+today|\s+this week|\?|$)/i
+    /(?:in|for|at)\s+([A-Za-z][a-zA-Z\s]{1,30}?)(?=[,!?]|\s+(?:tomorrow|today|this\s+week|next\s+week|on\s+\w|and\b)|$)/i
   );
   return match?.[1]?.trim() || "London";
 }

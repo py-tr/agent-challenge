@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { X, ArrowUp, Square, MessageSquare, Mail, Send, Check, ChevronDown } from "lucide-react";
-import { agentApi, pulseApi, type EmailDraftContext } from "../api/pulseApi";
+import { agentApi, pulseApi, type EmailDraftContext, type ConflictContext } from "../api/pulseApi";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -38,6 +38,8 @@ interface Props {
   pendingCount?: number;
   /** Title of the highest-priority pending item for the proactive welcome. */
   firstPendingTitle?: string;
+  /** When opened from a conflict_resolution card — enables reschedule intercept. */
+  conflictContext?: ConflictContext | null;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -411,6 +413,136 @@ function DraftBubble({
   );
 }
 
+// ─── Calendar helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Returns true when the email context suggests a follow-up meeting is relevant.
+ * Only show the calendar offer if the subject/body mentions scheduling language.
+ */
+function shouldOfferCalendar(subject: string, body: string): boolean {
+  const text = `${subject} ${body}`.toLowerCase();
+  return [
+    "call", "meeting", "sync", "discuss", "review", "follow up", "follow-up",
+    "schedule", "next week", "friday", "monday", "tuesday", "wednesday", "thursday",
+    "hop on", "catch up", "chat", "talk", "connect", ":00",
+  ].some((k) => text.includes(k));
+}
+
+/** Marker the draft-assist LLM embeds when it detects a calendar request. */
+const CALENDAR_INTENT_MARKER = "[CALENDAR_INTENT]";
+
+// ─── Calendar Follow-Up Offer ─────────────────────────────────────────────────
+
+interface CalendarOffer {
+  recipient: string;
+  subject: string;
+}
+
+function CalendarOfferPanel({
+  offer,
+  onSchedule,
+  onDecline,
+}: {
+  offer: CalendarOffer;
+  onSchedule: (title: string, date: string, time: string) => void;
+  onDecline: () => void;
+}) {
+  const defaultDate = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().slice(0, 10);
+  })();
+
+  const [showForm, setShowForm] = useState(false);
+  const [title, setTitle] = useState(`Follow up: ${offer.subject}`);
+  const [date, setDate] = useState(defaultDate);
+  const [time, setTime] = useState("10:00");
+
+  if (!showForm) {
+    return (
+      <div className="rounded-xl border p-3 text-xs space-y-2" style={{ borderColor: "#bfdbfe", backgroundColor: "#eff6ff" }}>
+        <p className="font-medium" style={{ color: "#1e40af" }}>
+          Schedule a follow-up meeting?
+        </p>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowForm(true)}
+            className="flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-colors active:scale-95"
+            style={{ backgroundColor: "#2563eb" }}
+          >
+            Yes, schedule it
+          </button>
+          <button
+            onClick={onDecline}
+            className="flex-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:opacity-80 active:scale-95"
+            style={{ borderColor: "#bfdbfe", backgroundColor: "#fff", color: "#2563eb" }}
+          >
+            No thanks
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border p-3 text-xs space-y-2" style={{ borderColor: "#bfdbfe", backgroundColor: "#eff6ff" }}>
+      <p className="font-semibold" style={{ color: "#1e40af" }}>Schedule a follow-up</p>
+
+      <div>
+        <label className="mb-0.5 block text-[10px] font-medium" style={{ color: "#6b7280" }}>Title</label>
+        <input
+          type="text"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          className="w-full rounded border px-2 py-1 text-xs focus:outline-none focus:ring-1"
+          style={{ borderColor: "#bfdbfe", backgroundColor: "#fff", color: "#1f2937" }}
+        />
+      </div>
+
+      <div className="flex gap-2">
+        <div className="flex-1">
+          <label className="mb-0.5 block text-[10px] font-medium" style={{ color: "#6b7280" }}>Date</label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="w-full rounded border px-2 py-1 text-xs focus:outline-none"
+            style={{ borderColor: "#bfdbfe", backgroundColor: "#fff", color: "#1f2937" }}
+          />
+        </div>
+        <div>
+          <label className="mb-0.5 block text-[10px] font-medium" style={{ color: "#6b7280" }}>Time</label>
+          <input
+            type="time"
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+            className="rounded border px-2 py-1 text-xs focus:outline-none"
+            style={{ borderColor: "#bfdbfe", backgroundColor: "#fff", color: "#1f2937", width: "90px" }}
+          />
+        </div>
+      </div>
+
+      <div className="flex gap-2 pt-0.5">
+        <button
+          onClick={() => onSchedule(title, date, time)}
+          disabled={!title.trim() || !date || !time}
+          className="flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-colors disabled:opacity-40 active:scale-95"
+          style={{ backgroundColor: "#2563eb" }}
+        >
+          Add to Calendar
+        </button>
+        <button
+          onClick={onDecline}
+          className="rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:opacity-80 active:scale-95"
+          style={{ borderColor: "#bfdbfe", backgroundColor: "#fff", color: "#2563eb" }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── ChatDrawer ───────────────────────────────────────────────────────────────
 
 export function ChatDrawer({
@@ -425,6 +557,7 @@ export function ChatDrawer({
   userDisplayName,
   pendingCount,
   firstPendingTitle,
+  conflictContext,
 }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -440,6 +573,7 @@ export function ChatDrawer({
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [smartReplies, setSmartReplies] = useState<string[]>([]);
   const [isLoadingReplies, setIsLoadingReplies] = useState(false);
+  const [calendarOffer, setCalendarOffer] = useState<CalendarOffer | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -551,7 +685,7 @@ export function ChatDrawer({
         bodySnippet: (emailDraft.originalSnippet ?? emailDraft.body).slice(0, 200),
       })
       .then(({ suggestions }) => {
-        if (!cancelled && suggestions.length === 3) setSmartReplies(suggestions);
+        if (!cancelled && suggestions.length > 0) setSmartReplies(suggestions);
       })
       .catch(() => { /* fallback already set */ })
       .finally(() => { if (!cancelled) setIsLoadingReplies(false); });
@@ -641,14 +775,20 @@ export function ChatDrawer({
       }
       await pulseApi.sendEmail({ ...draft, to, body });
 
-      // Show success overlay, refresh queue, then auto-close after 2s
+      // Show brief success overlay, then offer follow-up only when relevant
       setEmailSentSuccess(true);
       onEmailSent?.();
       onQueueRefresh?.();
       setTimeout(() => {
         setEmailSentSuccess(false);
-        onClose();
-      }, 2000);
+        if (shouldOfferCalendar(draft.subject, currentDraftBodyRef.current)) {
+          setCalendarOffer({ recipient: to, subject: draft.subject });
+          // Scroll the offer into view (user may be scrolled to top from handleUseDraft)
+          setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 80);
+        } else {
+          onClose();
+        }
+      }, 1200);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error("[Email] Send failed:", e);
@@ -660,6 +800,33 @@ export function ChatDrawer({
       setIsSendingEmail(false);
     }
   }, [onEmailSent, onQueueRefresh, onClose, userDisplayName]);
+
+  // sendToAgentRef lets handleScheduleFollowUp call sendToAgent without
+  // creating a circular dependency (sendToAgent is defined further down).
+  const sendToAgentRef = useRef<((text: string) => Promise<void>) | null>(null);
+
+  // ── Calendar follow-up handlers ─────────────────────────────────────────────
+
+  const handleDeclineFollowUp = useCallback(() => {
+    setCalendarOffer(null);
+    onClose();
+  }, [onClose]);
+
+  const handleScheduleFollowUp = useCallback(
+    async (title: string, date: string, time: string) => {
+      const offer = calendarOffer;
+      if (!offer) return;
+      setCalendarOffer(null);
+
+      // Build a natural-language request — CreateCalendarEventAction parses it.
+      const msg =
+        `Schedule a calendar event: "${title}" with ${offer.recipient} ` +
+        `on ${date} at ${time}. Please confirm once added.`;
+
+      await sendToAgentRef.current?.(msg);
+    },
+    [calendarOffer]
+  );
 
   // ── Core send function ──────────────────────────────────────────────────────
 
@@ -689,10 +856,135 @@ export function ChatDrawer({
       setMessages((prev) => [...prev, { role: "user", text: trimmed, ts: new Date() }]);
       setIsLoading(true);
 
-      // Inject current draft as context when in draft mode
-      const agentText = draft
-        ? `[Email draft — To: ${draft.to}, Subject: "${draft.subject}"]\n\nCurrent body:\n${currentDraftBodyRef.current}\n\n---\n\n${trimmed}`
-        : trimmed;
+      // ── Draft mode: bypass the ElizaOS agent pipeline entirely ─────────────
+      // Providers (ActionQueueProvider etc.) inject queue/calendar context into
+      // every agent message. In draft mode we call /pulse/draft-assist directly —
+      // a stateless LLM endpoint with a focused email-editor prompt and no
+      // provider injection. This prevents the model from responding to the queue
+      // instead of editing the email.
+      if (draft) {
+        const controller = new AbortController();
+        abortRef.current = controller;
+
+        try {
+          const { reply: rawReply } = await pulseApi.draftAssist({
+            subject: draft.subject,
+            to: draft.to,
+            currentBody: currentDraftBodyRef.current,
+            instruction: trimmed,
+            originalFrom: draft.originalFrom,
+            originalSnippet: draft.originalSnippet,
+          });
+          if (controller.signal.aborted) return;
+
+          // Strip [CALENDAR_INTENT] marker — show the cleaned reply, then offer
+          const hasCalendarIntent = rawReply.includes(CALENDAR_INTENT_MARKER);
+          const reply = rawReply.replace(CALENDAR_INTENT_MARKER, "").trim();
+
+          const suggestion = extractDraftSuggestion(reply);
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "agent",
+              text: reply || "…",
+              ts: new Date(),
+              draftSuggestion: suggestion ?? undefined,
+            },
+          ]);
+
+          if (hasCalendarIntent) {
+            setCalendarOffer({ recipient: draft.to, subject: draft.subject });
+            setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 80);
+          }
+        } catch (e) {
+          if (e instanceof Error && e.name === "AbortError") return;
+          const message = e instanceof Error ? e.message : "Unknown error";
+          setMessages((prev) => [
+            ...prev,
+            { role: "agent", text: `Sorry, couldn't rewrite the draft: ${message}`, ts: new Date() },
+          ]);
+        } finally {
+          abortRef.current = null;
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      // ── Calendar creation: intercept before ElizaOS pipeline ────────────────
+      // ElizaOS's model selection is unreliable for triggering actions — the LLM
+      // often generates a REPLY that sounds like it created the event but never
+      // calls the action handler. We intercept here and hit the route directly,
+      // same pattern as draft-assist.
+      // Matches: "schedule/book/create X tomorrow at 13:00"
+      const CALENDAR_CREATE_RE =
+        /\b(schedule|book|set\s+up|create)\b.{0,120}\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next\s+week|at\s+\d|\d{1,2}:\d{2})/i;
+      // Matches: "put/add X into/onto my calendar" (event name can appear between verb and calendar)
+      const CALENDAR_EXPLICIT_RE =
+        /\b(put|add)\b.{0,120}\b(in(to)?|on(to)?)\s+(my\s+)?(calendar|cal)\b/i;
+
+      if (!draft && (CALENDAR_CREATE_RE.test(trimmed) || CALENDAR_EXPLICIT_RE.test(trimmed))) {
+        try {
+          const result = await pulseApi.createCalendarEvent(trimmed);
+          setMessages((prev) => [
+            ...prev,
+            { role: "agent", text: result.confirmText, ts: new Date(), positive: true },
+          ]);
+        } catch (e) {
+          const message = e instanceof Error ? e.message : "Unknown error";
+          setMessages((prev) => [
+            ...prev,
+            { role: "agent", text: `Sorry, I couldn't create the calendar event: ${message}`, ts: new Date() },
+          ]);
+        } finally {
+          if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
+          abortRef.current = null;
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      // ── Conflict resolution: intercept when chat opened from a conflict card ─
+      // If the user says anything that sounds like "reschedule X to Y time",
+      // call /pulse/resolve-conflict directly instead of letting ElizaOS hallucinate.
+      const RESCHEDULE_RE =
+        /\b(reschedule|move|shift|change|push|bump|cancel|drop)\b.{0,120}\b(to\s+\d|at\s+\d|\d{1,2}:\d{2}|[ap]m|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}\s*[ap]m)/i;
+      const RESCHEDULE_SIMPLE_RE =
+        /\b(reschedule|move it|shift it|change it|can you move|please move|please reschedule)\b/i;
+
+      if (!draft && conflictContext && (RESCHEDULE_RE.test(trimmed) || RESCHEDULE_SIMPLE_RE.test(trimmed))) {
+        try {
+          const result = await pulseApi.resolveConflict({
+            message:     trimmed,
+            eventAId:    conflictContext.eventAId,
+            eventBId:    conflictContext.eventBId,
+            eventATitle: conflictContext.eventATitle,
+            eventBTitle: conflictContext.eventBTitle,
+            eventAStart: conflictContext.eventAStart,
+            eventAEnd:   conflictContext.eventAEnd,
+            eventBStart: conflictContext.eventBStart,
+            eventBEnd:   conflictContext.eventBEnd,
+            date:        conflictContext.date,
+          });
+          setMessages((prev) => [
+            ...prev,
+            { role: "agent", text: result.text, ts: new Date(), positive: result.action === "rescheduled" },
+          ]);
+        } catch (e) {
+          const message = e instanceof Error ? e.message : "Unknown error";
+          setMessages((prev) => [
+            ...prev,
+            { role: "agent", text: `Sorry, I couldn't process that reschedule: ${message}`, ts: new Date() },
+          ]);
+        } finally {
+          if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
+          abortRef.current = null;
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      // ── General chat: full ElizaOS agent pipeline ───────────────────────────
+      const agentText = trimmed;
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -797,6 +1089,10 @@ export function ChatDrawer({
     },
     [agentId, sessionId, sendEmailDraft, onQueueRefresh, startPolling]
   );
+
+  // Keep the ref current so handleScheduleFollowUp can call sendToAgent
+  // without a forward-reference issue.
+  useEffect(() => { sendToAgentRef.current = sendToAgent; }, [sendToAgent]);
 
   // ── Auto-send (triggered by "Ask Pulse" card button) ───────────────────────
 
@@ -1000,6 +1296,13 @@ export function ChatDrawer({
               />
             ))}
             {isLoading && <ThinkingDots />}
+            {calendarOffer && (
+              <CalendarOfferPanel
+                offer={calendarOffer}
+                onSchedule={(title, date, time) => void handleScheduleFollowUp(title, date, time)}
+                onDecline={handleDeclineFollowUp}
+              />
+            )}
             <div ref={messagesEndRef} />
           </div>
         )}

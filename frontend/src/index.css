@@ -36,3 +36,8 @@
     @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
   }
 }
+
+@keyframes drain-bar {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}

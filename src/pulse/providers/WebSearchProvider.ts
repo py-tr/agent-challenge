@@ -58,8 +58,9 @@ function timedFetch(url: string, init: RequestInit, ms = FETCH_TIMEOUT_MS): Prom
 }
 
 function extractCity(query: string): string {
+  // Stop at comma/punctuation so "in Prague, and tell me..." extracts just "Prague"
   const match = query.match(
-    /(?:in|for|at)\s+([A-Z][a-zA-Z\s]+?)(?:\s+tomorrow|\s+today|\s+this week|\?|$)/i
+    /(?:in|for|at)\s+([A-Za-z][a-zA-Z\s]{1,30}?)(?=[,!?]|\s+(?:tomorrow|today|this\s+week|next\s+week|on\s+\w|and\b)|$)/i
   );
   return match?.[1]?.trim() || "London";
 }
@@ -273,9 +274,9 @@ export const webSearchProvider: Provider = {
       ? await fetchWeather(text)
       : await fetchDdgInstant(text);
 
-    // Always cache — including the unavailable message, to avoid hammering dead endpoints.
-    setCached(cacheKey, result);
+    // Only cache successful results — don't poison the cache with transient failures.
+    if (result !== SEARCH_UNAVAILABLE) setCached(cacheKey, result);
 
-    return { text: `Real-time web data:\n${result}\nUse this to answer accurately.` };
+    return { text: `[REAL-TIME DATA — use ONLY this, do NOT fabricate numbers]\n${result}` };
   },
 };

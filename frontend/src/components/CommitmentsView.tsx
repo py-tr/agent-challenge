@@ -15,7 +15,7 @@ interface Props {
   loading: boolean;
   onApprove: (id: string) => Promise<void>;
   onReject: (id: string, reason?: string) => Promise<void>;
-  onAskPulse?: (title: string, body: string) => void;
+  onAskPulse?: (item: ActionItem) => void;
   /** Recent decisions — used to compute the commitment streak. */
   decisions?: Decision[];
 }
@@ -223,7 +223,7 @@ export function CommitmentsView({ items, loading, onApprove, onReject, onAskPuls
               item={item}
               onApprove={() => onApprove(item.id)}
               onReject={(reason) => onReject(item.id, reason)}
-              onAskPulse={onAskPulse ? () => onAskPulse(item.title, item.body) : undefined}
+              onAskPulse={onAskPulse ? () => onAskPulse(item) : undefined}
             />
           ))}
         </div>

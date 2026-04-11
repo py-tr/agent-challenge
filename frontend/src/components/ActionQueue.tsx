@@ -1,7 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Check, X, ChevronDown, ChevronUp, CheckCircle2, MessageSquare, Mail, ArrowUpDown, GitBranch } from "lucide-react";
+import { Check, X, ChevronDown, ChevronUp, CheckCircle2, MessageSquare, Mail, ArrowUpDown, GitBranch, Undo2, Calendar, ArrowRight, Loader2 } from "lucide-react";
 import type { ActionItem, ActionItemType } from "../api/pulseApi";
+import { pulseApi } from "../api/pulseApi";
+import type { UndoEntry } from "../App";
 import { SlibGuardAlert } from "./SlibGuardAlert";
+
+const UNDO_DELAY_MS = 3_000;
 
 interface Props {
   items: ActionItem[];
@@ -9,8 +13,10 @@ interface Props {
   onApprove: (id: string) => Promise<void>;
   onReject: (id: string, reason?: string) => Promise<void>;
   onDismiss?: (id: string) => Promise<void>;
-  onAskPulse?: (title: string, body: string) => void;
+  onAskPulse?: (item: ActionItem) => void;
   onEmailReview?: (item: ActionItem) => void;
+  undoStates?: Map<string, UndoEntry>;
+  onUndo?: (id: string) => void;
 }
 
 // ─── Type metadata ────────────────────────────────────────────────────────────
@@ -149,9 +155,357 @@ function BodyRenderer({ text }: { text: string }) {
   );
 }
 
+// ─── Undo card ────────────────────────────────────────────────────────────────
+
+function UndoCard({
+  item,
+  undoEntry,
+  onUndo,
+}: {
+  item: ActionItem;
+  undoEntry: UndoEntry;
+  onUndo: () => void;
+}) {
+  const meta = TYPE_META[item.type as Exclude<ActionItemType, "follow_up">] ?? TYPE_META.email_draft;
+  // Compute remaining time at mount so the CSS animation starts from the correct position
+  const [remaining] = useState(() =>
+    Math.max(0, UNDO_DELAY_MS - (Date.now() - undoEntry.startedAt))
+  );
+  const isApproved  = undoEntry.type === "approved";
+  const isDismissed = undoEntry.type === "dismissed";
+  const label       = isApproved ? "Approved ✓" : isDismissed ? "Skipped" : "Rejected ✗";
+  const accentColor = isApproved ? "#22c55e" : "#ef4444";
+
+  const sourceConflictTitle =
+    item.type === "email_draft"
+      ? (item.metadata?.sourceConflictTitle as string | undefined)
+      : undefined;
+
+  const preview = item.body
+    .split("\n")
+    .find((l) => l.trim().length > 0 && !l.startsWith("#"))
+    ?.replace(/\*\*(.+?)\*\*/g, "$1")
+    .slice(0, 180);
+
+  const cardStyle: React.CSSProperties = { borderLeft: `4px solid ${accentColor}` };
+  const cardClass = [
+    "overflow-hidden rounded-xl border border-l-4 transition-all duration-300",
+    isApproved ? "bg-green-50/60 border-green-200 shadow-sm" : "bg-red-50/40 border-red-200 shadow-sm",
+  ].join(" ");
+
+  return (
+    <article className={cardClass} style={cardStyle}>
+      <div className="p-5">
+        {/* Header — same layout as ItemCard */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className={`badge ${meta.badgeClass}`}>{meta.label}</span>
+            {item.priority <= 2 && (
+              <span
+                className={`badge text-xs font-semibold ${
+                  item.priority === 1
+                    ? "bg-red-50 text-red-600 ring-1 ring-red-200/60"
+                    : "bg-amber-50 text-amber-600 ring-1 ring-amber-200/60"
+                }`}
+              >
+                P{item.priority}
+              </span>
+            )}
+            {sourceConflictTitle && (
+              <span className="inline-flex items-center gap-1 badge text-xs bg-violet-50 text-violet-600 ring-1 ring-violet-200/60">
+                <GitBranch size={10} />
+                From conflict
+              </span>
+            )}
+          </div>
+          <span className="text-xs text-gray-400">{relativeTime(item.createdAt)}</span>
+        </div>
+
+        <h3 className="mt-3 text-base font-semibold leading-snug text-gray-500 line-through decoration-1">
+          {item.title}
+        </h3>
+
+        {preview && (
+          <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-gray-400">{preview}</p>
+        )}
+      </div>
+
+      {/* Action footer — replaced with confirmation + undo */}
+      <div className="flex items-center justify-between gap-2 border-t px-5 py-3"
+        style={{ borderColor: isApproved ? "#bbf7d0" : "#fecaca",
+                 backgroundColor: isApproved ? "rgb(240 253 244 / 0.6)" : "rgb(254 242 242 / 0.4)" }}
+      >
+        <span className="text-sm font-semibold" style={{ color: accentColor }}>
+          {label}
+        </span>
+        <button
+          onClick={onUndo}
+          className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:border-gray-400 active:scale-[0.97] transition-all shadow-sm"
+        >
+          <Undo2 size={12} />
+          Undo
+        </button>
+      </div>
+
+      {/* Drain bar — animates from full width to zero over the remaining undo window */}
+      <div className="h-1" style={{ backgroundColor: isApproved ? "#dcfce7" : "#fee2e2" }}>
+        <div
+          className="h-full origin-left"
+          style={{
+            backgroundColor: accentColor,
+            animationName: "drain-bar",
+            animationDuration: `${remaining}ms`,
+            animationTimingFunction: "linear",
+            animationFillMode: "forwards",
+          }}
+        />
+      </div>
+    </article>
+  );
+}
+
+// ─── Conflict card ────────────────────────────────────────────────────────────
+
+type ConflictStep = "pick-event" | "pick-slot" | "confirming";
+
+interface FreeSlot { start: string; end: string; label: string; }
+
+function ConflictCard({
+  item,
+  focused,
+  onApprove,
+  onReject,
+  onAskPulse,
+}: {
+  item: ActionItem;
+  focused: boolean;
+  onApprove: () => Promise<void>;
+  onReject: (reason?: string) => Promise<void>;
+  onAskPulse?: () => void;
+}) {
+  const meta = TYPE_META.conflict_resolution;
+  const [step, setStep]       = useState<ConflictStep>("pick-event");
+  const [slots, setSlots]     = useState<FreeSlot[]>([]);
+  const [slotsErr, setSlotsErr] = useState<string | null>(null);
+  const [chosenEventId, setChosenEventId] = useState<string | null>(null);
+  const [chosenDuration, setChosenDuration] = useState(60);
+  const [busy, setBusy]       = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  const m = item.metadata as Record<string, unknown> | null;
+  const eventAId    = m?.eventAId    as string | undefined;
+  const eventBId    = m?.eventBId    as string | undefined;
+  const eventATitle = (m?.eventATitle as string | undefined) ?? "Event A";
+  const eventBTitle = (m?.eventBTitle as string | undefined) ?? "Event B";
+  const eventAStart = m?.eventAStart as string | undefined;
+  const eventBStart = m?.eventBStart as string | undefined;
+  const eventAEnd   = m?.eventAEnd   as string | undefined;
+  const eventBEnd   = m?.eventBEnd   as string | undefined;
+  const date        = (m?.date       as string | undefined) ?? eventAStart?.slice(0, 10) ?? "";
+
+  async function pickEvent(eventId: string, start?: string, end?: string) {
+    setChosenEventId(eventId);
+    const durMs = start && end
+      ? new Date(end).getTime() - new Date(start).getTime()
+      : 60 * 60_000;
+    const dur = Math.max(15, Math.round(durMs / 60_000));
+    setChosenDuration(dur);
+    setStep("pick-slot");
+    setBusy(true);
+    setSlotsErr(null);
+    try {
+      const res = await pulseApi.findFreeSlots({
+        date,
+        durationMinutes: dur,
+        excludeEventIds: [eventAId, eventBId].filter(Boolean) as string[],
+      });
+      setSlots(res.slots);
+      if (res.slots.length === 0) setSlotsErr("No free slots found for this day.");
+    } catch (e) {
+      setSlotsErr(e instanceof Error ? e.message : "Failed to load slots");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function pickSlot(slot: FreeSlot) {
+    if (!chosenEventId) return;
+    setBusy(true);
+    setStep("confirming");
+    try {
+      await pulseApi.rescheduleEvent({
+        eventId:  chosenEventId,
+        newStart: slot.start,
+        newEnd:   slot.end,
+      });
+      // Approve the item through the normal flow → triggers undo card + email draft
+      await onApprove();
+    } catch (e) {
+      setSlotsErr(e instanceof Error ? e.message : "Reschedule failed");
+      setStep("pick-slot");
+      setBusy(false);
+    }
+  }
+
+  const cardStyle: React.CSSProperties = focused
+    ? { borderLeft: "4px solid #4f46e5" }
+    : { borderLeft: `4px solid ${meta.borderColor}` };
+
+  const cardClass = [
+    "overflow-hidden rounded-xl border border-l-4 transition-all duration-300",
+    focused ? "bg-indigo-50/30 border-indigo-200 shadow-md" : "bg-white border-gray-100 shadow-sm hover:shadow-md",
+  ].join(" ");
+
+  const preview = item.body
+    .split("\n")
+    .find((l) => l.trim().length > 0 && !l.startsWith("#"))
+    ?.replace(/\*\*(.+?)\*\*/g, "$1")
+    .slice(0, 180);
+
+  return (
+    <article className={cardClass} style={cardStyle}>
+      <div className="p-5">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className={`badge ${meta.badgeClass}`}>{meta.label}</span>
+            {item.priority <= 2 && (
+              <span className={`badge text-xs font-semibold ${
+                item.priority === 1
+                  ? "bg-red-50 text-red-600 ring-1 ring-red-200/60"
+                  : "bg-amber-50 text-amber-600 ring-1 ring-amber-200/60"
+              }`}>P{item.priority}</span>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="text-xs text-gray-400">{relativeTime(item.createdAt)}</span>
+            <button
+              onClick={() => setExpanded((v) => !v)}
+              className="rounded-md p-1 text-gray-300 hover:bg-gray-100 hover:text-gray-500 transition-colors"
+              aria-label={expanded ? "Collapse" : "Expand"}
+            >
+              {expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+            </button>
+          </div>
+        </div>
+
+        <h3 className="mt-3 text-base font-semibold leading-snug text-gray-900">{item.title}</h3>
+
+        {expanded ? (
+          <div className="mt-3"><BodyRenderer text={item.body} /></div>
+        ) : (
+          preview && <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-gray-500">{preview}</p>
+        )}
+
+        {/* Step UI */}
+        <div className="mt-4">
+          {step === "pick-event" && (
+            <div>
+              <p className="mb-2 text-xs font-medium text-gray-500 flex items-center gap-1.5">
+                <Calendar size={12} className="text-red-400" />
+                Which event should be rescheduled?
+              </p>
+              {!eventAId && !eventBId ? (
+                <p className="text-xs text-gray-400 italic">
+                  Calendar event IDs not available — use Ask Pulse to resolve this conflict via chat.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  {[
+                    { id: eventAId, title: eventATitle, start: eventAStart, end: eventAEnd },
+                    { id: eventBId, title: eventBTitle, start: eventBStart, end: eventBEnd },
+                  ].map((ev) => ev.id && (
+                    <button
+                      key={ev.id}
+                      onClick={() => void pickEvent(ev.id!, ev.start, ev.end)}
+                      disabled={busy}
+                      className="flex flex-1 items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50/60 px-3 py-2 text-left text-xs font-medium text-red-800 hover:bg-red-100 hover:border-red-300 active:scale-[0.98] transition-all disabled:opacity-50"
+                    >
+                      <span className="truncate">{ev.title}</span>
+                      <ArrowRight size={12} className="shrink-0 text-red-400" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {step === "pick-slot" && (
+            <div>
+              <p className="mb-2 text-xs font-medium text-gray-500 flex items-center gap-1.5">
+                <Calendar size={12} className="text-indigo-400" />
+                Pick a new time:
+              </p>
+              {busy && (
+                <div className="flex items-center gap-2 text-xs text-gray-400">
+                  <Loader2 size={12} className="animate-spin" />
+                  Finding free slots…
+                </div>
+              )}
+              {!busy && slotsErr && (
+                <p className="text-xs text-red-500">{slotsErr}</p>
+              )}
+              {!busy && !slotsErr && slots.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {slots.map((slot) => (
+                    <button
+                      key={slot.start}
+                      onClick={() => void pickSlot(slot)}
+                      disabled={busy}
+                      className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100 hover:border-indigo-300 active:scale-[0.97] transition-all"
+                    >
+                      {slot.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                onClick={() => setStep("pick-event")}
+                disabled={busy}
+                className="mt-2 text-xs text-gray-400 hover:text-gray-600 underline"
+              >
+                ← Back
+              </button>
+            </div>
+          )}
+
+          {step === "confirming" && (
+            <div className="flex items-center gap-2 text-xs text-gray-400">
+              <Loader2 size={12} className="animate-spin" />
+              Rescheduling…
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between gap-2 border-t border-gray-100 bg-gray-50/60 px-5 py-3">
+        {onAskPulse ? (
+          <button
+            onClick={onAskPulse}
+            disabled={busy}
+            className="btn border border-indigo-200 bg-white py-1.5 px-3 text-xs font-medium text-indigo-600 hover:bg-indigo-50 hover:border-indigo-300 transition-colors disabled:opacity-50"
+          >
+            <MessageSquare size={12} />
+            Ask Pulse
+          </button>
+        ) : <div />}
+        <button
+          onClick={() => void onReject()}
+          disabled={busy}
+          className="btn-reject py-1.5 px-3.5 text-xs"
+        >
+          <X size={13} />
+          Reject
+        </button>
+      </div>
+    </article>
+  );
+}
+
 // ─── Item card ────────────────────────────────────────────────────────────────
 
-type FlashState = "idle" | "approve" | "reject" | "exit";
+type FlashState = "idle" | "approve" | "reject";
 
 function ItemCard({
   item,
@@ -190,20 +544,14 @@ function ItemCard({
     };
   }, []);
 
-  function triggerExit(type: "approve" | "reject") {
-    if (animTimer.current) clearTimeout(animTimer.current);
-    setFlash(type);
-    animTimer.current = setTimeout(() => setFlash("exit"), 200);
-  }
-
   async function handleApprove() {
-    triggerExit("approve");
+    setFlash("approve");
     setBusy(true);
     try { await onApprove(); } finally { setBusy(false); }
   }
 
   async function handleReject(reason?: string) {
-    triggerExit("reject");
+    setFlash("reject");
     setBusy(true);
     try { await onReject(reason); } finally {
       setBusy(false);
@@ -213,7 +561,7 @@ function ItemCard({
   }
 
   async function handleDismiss() {
-    triggerExit("reject");
+    setFlash("reject");
     setBusy(true);
     try { await onDismiss?.(); } finally { setBusy(false); }
   }
@@ -237,7 +585,6 @@ function ItemCard({
     "overflow-hidden rounded-xl border border-l-4 transition-all duration-300",
     flash === "approve" ? "bg-green-50/70 border-green-200 shadow-sm" :
     flash === "reject"  ? "bg-red-50/70 border-red-200 shadow-sm" :
-    flash === "exit"    ? "opacity-0 -translate-y-2 scale-[0.97] shadow-none pointer-events-none" :
     focused             ? "bg-indigo-50/30 border-indigo-200 shadow-md" :
                           "bg-white border-gray-100 shadow-sm hover:shadow-md",
   ].join(" ");
@@ -441,7 +788,7 @@ function KeyboardHint() {
 
 // ─── Action Queue ─────────────────────────────────────────────────────────────
 
-export function ActionQueue({ items, loading, onApprove, onReject, onDismiss, onAskPulse, onEmailReview }: Props) {
+export function ActionQueue({ items, loading, onApprove, onReject, onDismiss, onAskPulse, onEmailReview, undoStates, onUndo }: Props) {
   const [filter, setFilter] = useState<FilterType>("all");
   const [sortByPriority, setSortByPriority] = useState(false);
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
@@ -531,16 +878,42 @@ export function ActionQueue({ items, loading, onApprove, onReject, onDismiss, on
       {filtered.length > 0 && <KeyboardHint />}
 
       <div className="space-y-4">
-        {filtered.map((item, idx) =>
-          item.type === "slib_reminder" ? (
-            <SlibGuardAlert
-              key={item.id}
-              item={item}
-              onApprove={() => onApprove(item.id)}
-              onReject={(reason) => onReject(item.id, reason)}
-              onAskPulse={onAskPulse ? () => onAskPulse(item.title, item.body) : undefined}
-            />
-          ) : (
+        {filtered.map((item, idx) => {
+          const undoEntry = undoStates?.get(item.id);
+          if (undoEntry) {
+            return (
+              <UndoCard
+                key={item.id}
+                item={item}
+                undoEntry={undoEntry}
+                onUndo={() => onUndo?.(item.id)}
+              />
+            );
+          }
+          if (item.type === "slib_reminder") {
+            return (
+              <SlibGuardAlert
+                key={item.id}
+                item={item}
+                onApprove={() => onApprove(item.id)}
+                onReject={(reason) => onReject(item.id, reason)}
+                onAskPulse={onAskPulse ? () => onAskPulse(item) : undefined}
+              />
+            );
+          }
+          if (item.type === "conflict_resolution") {
+            return (
+              <ConflictCard
+                key={item.id}
+                item={item}
+                focused={focusedIdx === idx}
+                onApprove={() => onApprove(item.id)}
+                onReject={(reason) => onReject(item.id, reason)}
+                onAskPulse={onAskPulse ? () => onAskPulse(item) : undefined}
+              />
+            );
+          }
+          return (
             <ItemCard
               key={item.id}
               item={item}
@@ -548,11 +921,11 @@ export function ActionQueue({ items, loading, onApprove, onReject, onDismiss, on
               onApprove={() => onApprove(item.id)}
               onReject={(reason) => onReject(item.id, reason)}
               onDismiss={onDismiss ? () => onDismiss(item.id) : undefined}
-              onAskPulse={onAskPulse ? () => onAskPulse(item.title, item.body) : undefined}
+              onAskPulse={onAskPulse ? () => onAskPulse(item) : undefined}
               onEmailReview={onEmailReview ? () => onEmailReview(item) : undefined}
             />
-          )
-        )}
+          );
+        })}
 
         {filtered.length === 0 && filter !== "all" && (
           <p className="py-6 text-center text-sm text-gray-400">

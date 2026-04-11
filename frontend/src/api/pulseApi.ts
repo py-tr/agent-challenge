@@ -84,6 +84,20 @@ export interface BriefingResponse {
   briefing: BriefingData | null;
 }
 
+/** Passed to ChatDrawer when opened from a conflict_resolution item. */
+export interface ConflictContext {
+  itemId: string;
+  eventAId?: string;
+  eventBId?: string;
+  eventATitle: string;
+  eventBTitle: string;
+  eventAStart?: string;
+  eventAEnd?: string;
+  eventBStart?: string;
+  eventBEnd?: string;
+  date?: string;
+}
+
 /** Passed to ChatDrawer when the user wants to review/edit and send an email draft. */
 export interface EmailDraftContext {
   itemId: string;
@@ -156,7 +170,55 @@ export const pulseApi = {
       { method: "POST", body: JSON.stringify(params) }
     ),
 
+  /**
+   * Rewrite an email draft via a focused LLM call that bypasses all ElizaOS
+   * providers. Prevents queue/calendar context from leaking into draft rewrites.
+   */
+  draftAssist: (params: {
+    subject: string;
+    to: string;
+    currentBody: string;
+    instruction: string;
+    originalFrom?: string;
+    originalSnippet?: string;
+  }) =>
+    request<{ reply: string }>(
+      `/pulse/draft-assist`,
+      { method: "POST", body: JSON.stringify(params) }
+    ),
+
+  createCalendarEvent: (message: string) =>
+    request<{ success: boolean; title: string; start: string; end: string; eventId: string; confirmText: string }>(
+      `/pulse/create-calendar-event`,
+      { method: "POST", body: JSON.stringify({ message }) }
+    ),
+
   getBriefing: () => request<BriefingResponse>("/pulse/briefing"),
+
+  findFreeSlots: (params: { date: string; durationMinutes: number; excludeEventIds?: string[] }) =>
+    request<{ slots: Array<{ start: string; end: string; label: string }> }>(
+      `/pulse/find-free-slots`,
+      { method: "POST", body: JSON.stringify(params) }
+    ),
+
+  resolveConflict: (params: {
+    message: string;
+    eventAId?: string; eventBId?: string;
+    eventATitle?: string; eventBTitle?: string;
+    eventAStart?: string; eventAEnd?: string;
+    eventBStart?: string; eventBEnd?: string;
+    date?: string;
+  }) =>
+    request<{ action: "rescheduled" | "suggestions"; text: string; newStart?: string; eventId?: string }>(
+      `/pulse/resolve-conflict`,
+      { method: "POST", body: JSON.stringify(params) }
+    ),
+
+  rescheduleEvent: (params: { eventId: string; newStart: string; newEnd: string; timeZone?: string }) =>
+    request<{ success: boolean; eventId: string; title: string; newStart: string; label: string }>(
+      `/pulse/reschedule-event`,
+      { method: "POST", body: JSON.stringify(params) }
+    ),
 
   dismiss: (id: string) =>
     request<{ success: boolean; id: string; status: string }>(

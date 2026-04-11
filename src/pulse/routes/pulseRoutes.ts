@@ -45,6 +45,7 @@ import type { ActionItem } from "../types.js";
 import { GmailMcpService } from "../services/GmailMcpService.js";
 import { CalendarMcpService } from "../services/CalendarMcpService.js";
 import { MorningBriefingService } from "../services/MorningBriefingService.js";
+import { updateEvent, listEvents } from "../lib/calendarClient.js";
 
 /** Display name used in outgoing email signatures. Configurable via env. */
 const USER_DISPLAY_NAME =
@@ -446,9 +447,8 @@ export const pulseRoutes: Route[] = [
       try {
         const db = runtime.db as unknown as Db;
         const limitParam = req.query?.limit;
-        const limit = limitParam
-          ? Math.min(parseInt(String(limitParam), 10) || 20, 100)
-          : 20;
+        const parsed = parseInt(String(limitParam ?? ""), 10);
+        const limit  = limitParam ? Math.min(Number.isNaN(parsed) ? 20 : parsed, 100) : 20;
 
         const [decisionList, total, patterns] = await Promise.all([
           getDecisions(db, limit),
@@ -705,6 +705,314 @@ export const pulseRoutes: Route[] = [
     },
   },
 
+  // ── POST /pulse/draft-assist ──────────────────────────────────────────────
+  // Calls the LLM directly — bypassing all ElizaOS providers — with a focused
+  // email-editor system prompt. Prevents queue/calendar provider context from
+  // leaking into draft rewrites and causing the model to respond to other tasks.
+  {
+    type: "POST" as const,
+    path: "/draft-assist",
+    handler: async (req: RouteRequest, res: RouteResponse, runtime: IAgentRuntime) => {
+      try {
+        const {
+          subject = "",
+          to = "",
+          currentBody = "",
+          instruction = "",
+          originalFrom = "",
+          originalSnippet = "",
+        } = (req.body as {
+          subject?: string;
+          to?: string;
+          currentBody?: string;
+          instruction?: string;
+          originalFrom?: string;
+          originalSnippet?: string;
+        }) ?? {};
+
+        if (!instruction.trim()) {
+          err(res, "instruction is required", 400);
+          return;
+        }
+
+        // Build a self-contained prompt that instructs the model to act as a
+        // focused email editor. All context is in the user message so the
+        // character's system prompt does not pollute it with queue/calendar state.
+        const prompt = [
+          "You are acting as a focused email writing assistant. Your only task is to",
+          "edit the email draft below according to the user's instruction.",
+          "",
+          "STRICT RULES:",
+          "- Ignore any pending action items, queue entries, or calendar events in your context.",
+          "- Never invent meeting times, dates, deadlines, or commitments not present in the original email.",
+          "- Wrap the complete rewritten email body between --- separators on their own lines.",
+          "- Do not add commentary, explanations, or text outside the --- separators.",
+          "- If the user asks to add something to their calendar or schedule a meeting, include",
+          "  ONLY the single line [CALENDAR_INTENT] at the very end of your response (after the",
+          "  closing ---). Never say 'Meeting added', 'Calendar updated', or pretend to create",
+          "  events — you cannot do that. Just mark it and update the email text as requested.",
+          "",
+          `Email context:`,
+          `To: ${to || "(unknown)"}`,
+          `Subject: ${subject || "(no subject)"}`,
+          originalFrom ? `From: ${originalFrom}` : "",
+          originalSnippet ? `Original message:\n${originalSnippet.slice(0, 400)}` : "",
+          "",
+          "Current draft:",
+          currentBody || "(empty)",
+          "",
+          "---",
+          "",
+          `User instruction: ${instruction}`,
+          "",
+          "Rewrite the draft and wrap it in --- separators.",
+        ]
+          .filter((l) => l !== null)
+          .join("\n");
+
+        const TIMEOUT_MS = 90_000;
+        const raw = await Promise.race([
+          runtime.useModel(ModelType.TEXT_SMALL, {
+            prompt,
+            maxTokens: 1024,
+            temperature: 0.4,
+          }) as Promise<string>,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("LLM timeout after 90s")), TIMEOUT_MS)
+          ),
+        ]);
+
+        ok(res, { reply: (raw as string).trim() });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[Pulse:Routes] POST /pulse/draft-assist: ${msg}`);
+        err(res, msg);
+      }
+    },
+  },
+
+  // ── POST /pulse/create-calendar-event ────────────────────────────────────
+  // Directly creates a Google Calendar event from a natural-language message.
+  // Bypasses ElizaOS action selection (which is unreliable for tool invocation)
+  // by calling the LLM for extraction and the Calendar REST API directly.
+  {
+    type: "POST" as const,
+    path: "/create-calendar-event",
+    handler: async (req: RouteRequest, res: RouteResponse, runtime: IAgentRuntime) => {
+      try {
+        const { message } = (req.body as { message?: string }) ?? {};
+        if (!message?.trim()) { err(res, "message is required", 400); return; }
+
+        const calSvc = runtime.getService(
+          CalendarMcpService.serviceType
+        ) as CalendarMcpService | null;
+        if (!calSvc) { err(res, "CalendarMcpService not available", 503); return; }
+
+        const today    = new Date().toISOString().slice(0, 10);
+        const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+
+        const extractPrompt =
+          `Today is ${today}. Extract calendar event details from the user message and return ONLY a JSON object.\n` +
+          `User message: "${message}"\n\n` +
+          `JSON format:\n` +
+          `{"title":"...","date":"YYYY-MM-DD","startTime":"HH:MM","durationMinutes":60,"timeZone":null}\n\n` +
+          `Rules:\n` +
+          `- "tomorrow" = ${tomorrow}\n` +
+          `- "morning" = 09:00, "noon" = 12:00, "afternoon" = 14:00, "evening" = 18:00\n` +
+          `- Resolve weekday names relative to today (${today})\n` +
+          `- timeZone: IANA string if mentioned, otherwise null\n` +
+          `- Return ONLY raw JSON, no markdown fences, no extra text.`;
+
+        const raw = await Promise.race([
+          runtime.useModel(ModelType.TEXT_SMALL, {
+            prompt: extractPrompt,
+            maxTokens: 256,
+            temperature: 0.1,
+          }) as Promise<string>,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("LLM timeout after 30s")), 30_000)
+          ),
+        ]);
+
+        const cleaned = (raw as string)
+          .replace(/^```(?:json)?\s*/i, "")
+          .replace(/\s*```\s*$/, "")
+          .trim();
+
+        let details: {
+          title: string;
+          date: string;
+          startTime: string;
+          durationMinutes?: number;
+          timeZone?: string | null;
+        };
+        try {
+          details = JSON.parse(cleaned) as typeof details;
+          if (!details.title || !details.date || !details.startTime) {
+            throw new Error("incomplete JSON");
+          }
+        } catch {
+          console.warn("[Pulse:Routes] create-calendar-event: LLM extraction failed:", cleaned.slice(0, 200));
+          err(res, "Could not extract event details — try: \"Schedule golf tomorrow at 13:00\"", 422);
+          return;
+        }
+
+        // Build ISO datetime strings (naive, no UTC conversion)
+        const pad = (n: number) => String(n).padStart(2, "0");
+        const normalTime = details.startTime.slice(0, 5).padStart(5, "0");
+        const startIso   = `${details.date}T${normalTime}:00`;
+        const [hhStr, mmStr] = normalTime.split(":");
+        const durMins   = details.durationMinutes ?? 60;
+        const totalMins = Number(hhStr) * 60 + Number(mmStr) + durMins;
+        const endHh     = Math.floor(totalMins / 60) % 24;
+        const endMm     = totalMins % 60;
+        const endIso    = `${details.date}T${pad(endHh)}:${pad(endMm)}:00`;
+        const timeZone  = details.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+        console.log(`[Pulse:Routes] Creating calendar event: "${details.title}" ${startIso} tz=${timeZone}`);
+
+        const created = await calSvc.createEvent({
+          title:    details.title,
+          start:    startIso,
+          end:      endIso,
+          timeZone,
+        });
+
+        const startReadable = new Date(`${details.date}T${normalTime}`).toLocaleString("en-US", {
+          weekday: "short", month: "short", day: "numeric",
+          hour: "numeric", minute: "2-digit",
+        });
+
+        ok(res, {
+          success: true,
+          title:       details.title,
+          start:       created.start,
+          end:         created.end,
+          eventId:     created.id,
+          confirmText: `Done! **${details.title}** added to your calendar for ${startReadable}.`,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[Pulse:Routes] POST /pulse/create-calendar-event: ${msg}`);
+        err(res, msg);
+      }
+    },
+  },
+
+  // ── POST /pulse/find-free-slots ──────────────────────────────────────────
+  // Given an ISO date and duration in minutes, returns up to 3 available time
+  // slots for that day by scanning existing events for gaps.
+  {
+    type: "POST" as const,
+    path: "/find-free-slots",
+    handler: async (req: RouteRequest, res: RouteResponse) => {
+      try {
+        const { date, durationMinutes = 60, excludeEventIds = [] } =
+          (req.body as { date?: string; durationMinutes?: number; excludeEventIds?: string[] }) ?? {};
+
+        if (!date) { err(res, "date required", 400); return; }
+
+        // Fetch a 3-day window centred on the target date so we capture all events.
+        const result = await listEvents(3);
+        const events = result.events.filter((e) => {
+          if (e.allDay) return false;
+          if ((excludeEventIds as string[]).includes(e.id)) return false;
+          return e.start.startsWith(date);
+        });
+
+        // Build busy windows for the day.
+        const busy = events.map((e) => ({
+          start: new Date(e.start).getTime(),
+          end:   new Date(e.end).getTime(),
+        })).sort((a, b) => a.start - b.start);
+
+        // Search for free slots between 08:00 and 19:00 local time.
+        const dayStart = new Date(`${date}T08:00:00`).getTime();
+        const dayEnd   = new Date(`${date}T19:00:00`).getTime();
+        const slotMs   = durationMinutes * 60_000;
+        const slots: Array<{ start: string; end: string; label: string }> = [];
+
+        let cursor = dayStart;
+        while (cursor + slotMs <= dayEnd && slots.length < 3) {
+          const slotEnd = cursor + slotMs;
+          const blocked = busy.some(
+            (b) => cursor < b.end && slotEnd > b.start
+          );
+          if (!blocked) {
+            const fmt = (ms: number) =>
+              new Date(ms).toLocaleTimeString("en-US", {
+                hour: "numeric", minute: "2-digit", hour12: true,
+              });
+            slots.push({
+              start: new Date(cursor).toISOString(),
+              end:   new Date(slotEnd).toISOString(),
+              label: `${fmt(cursor)} – ${fmt(slotEnd)}`,
+            });
+            cursor = slotEnd;
+          } else {
+            // Jump past the blocking event.
+            const blocker = busy.find((b) => cursor < b.end && slotEnd > b.start);
+            cursor = blocker ? blocker.end : cursor + slotMs;
+          }
+        }
+
+        ok(res, { slots });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[Pulse:Routes] POST /pulse/find-free-slots: ${msg}`);
+        err(res, msg);
+      }
+    },
+  },
+
+  // ── POST /pulse/reschedule-event ─────────────────────────────────────────
+  // Move a Google Calendar event to a new time slot.
+  // Approval of the action item is handled separately by the frontend via
+  // the normal /approve/:id flow (so the email draft gets created too).
+  {
+    type: "POST" as const,
+    path: "/reschedule-event",
+    handler: async (req: RouteRequest, res: RouteResponse) => {
+      try {
+        const { eventId, newStart, newEnd, timeZone } =
+          (req.body as {
+            eventId?: string;
+            newStart?: string;
+            newEnd?: string;
+            timeZone?: string;
+          }) ?? {};
+
+        if (!eventId || !newStart || !newEnd) {
+          err(res, "eventId, newStart, newEnd required", 400);
+          return;
+        }
+
+        const updated = await updateEvent(eventId, {
+          start: newStart,
+          end:   newEnd,
+          timeZone: timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+        });
+
+        const startReadable = new Date(newStart).toLocaleString("en-US", {
+          weekday: "short", month: "short", day: "numeric",
+          hour: "numeric", minute: "2-digit",
+        });
+
+        ok(res, {
+          success:  true,
+          eventId:  updated.id,
+          title:    updated.title,
+          newStart: updated.start,
+          label:    startReadable,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[Pulse:Routes] POST /pulse/reschedule-event: ${msg}`);
+        err(res, msg);
+      }
+    },
+  },
+
   // ── POST /pulse/suggest-replies ───────────────────────────────────────────
   // Generates 3 short reply suggestions via LLM for a given email context.
   // Falls back to keyword-based suggestions if the LLM fails or times out.
@@ -721,6 +1029,155 @@ export const pulseRoutes: Route[] = [
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         console.error(`[Pulse:Routes] POST /pulse/suggest-replies: ${msg}`);
+        err(res, msg);
+      }
+    },
+  },
+
+  // ── POST /pulse/resolve-conflict ─────────────────────────────────────────
+  // Chat-driven conflict resolution. Given a natural-language message and
+  // conflict context, uses LLM to extract intent (which event + target time),
+  // then either reschedules immediately or returns free-slot suggestions.
+  {
+    type: "POST" as const,
+    path: "/resolve-conflict",
+    handler: async (req: RouteRequest, res: RouteResponse, runtime: IAgentRuntime) => {
+      try {
+        const {
+          message,
+          eventAId, eventBId,
+          eventATitle, eventBTitle,
+          eventAStart, eventAEnd,
+          eventBStart, eventBEnd,
+          date,
+        } = (req.body as {
+          message?: string;
+          eventAId?: string; eventBId?: string;
+          eventATitle?: string; eventBTitle?: string;
+          eventAStart?: string; eventAEnd?: string;
+          eventBStart?: string; eventBEnd?: string;
+          date?: string;
+        }) ?? {};
+
+        if (!message) { err(res, "message required", 400); return; }
+
+        const hasIds = !!(eventAId && eventBId);
+
+        // Step 1: LLM extracts which event to reschedule and target time.
+        const extractionPrompt =
+          `You are a scheduling assistant. Extract rescheduling intent from a user message.\n\n` +
+          `Context:\n` +
+          `  Event A: "${eventATitle ?? "Event A"}" (${eventAStart?.slice(11, 16) ?? "?"}–${eventAEnd?.slice(11, 16) ?? "?"})\n` +
+          `  Event B: "${eventBTitle ?? "Event B"}" (${eventBStart?.slice(11, 16) ?? "?"}–${eventBEnd?.slice(11, 16) ?? "?"})\n\n` +
+          `User message: "${message}"\n\n` +
+          `Reply with ONLY valid JSON, no markdown:\n` +
+          `{"targetEvent":"A"|"B"|"unknown","targetTime":"HH:MM"|null,"reasoning":"..."}\n` +
+          `targetTime must be 24h format (e.g. "16:00") or null if not mentioned.`;
+
+        const raw = await runtime.useModel(ModelType.TEXT_SMALL, {
+          prompt: extractionPrompt,
+          maxTokens: 120,
+          temperature: 0.1,
+        });
+
+        let extracted: { targetEvent: "A" | "B" | "unknown"; targetTime: string | null } = {
+          targetEvent: "unknown",
+          targetTime: null,
+        };
+        try {
+          const cleaned = raw.replace(/```(?:json)?/gi, "").trim();
+          const parsed = JSON.parse(cleaned) as typeof extracted;
+          extracted.targetEvent = parsed.targetEvent ?? "unknown";
+          extracted.targetTime  = parsed.targetTime ?? null;
+        } catch {
+          // Keep defaults — fall through to suggestions.
+        }
+
+        // Step 2: Act on extracted intent.
+        const chosenId    = extracted.targetEvent === "A" ? eventAId
+                          : extracted.targetEvent === "B" ? eventBId
+                          : undefined;
+        const chosenTitle = extracted.targetEvent === "A" ? (eventATitle ?? "Event A")
+                          : extracted.targetEvent === "B" ? (eventBTitle ?? "Event B")
+                          : undefined;
+        const sourceDurationMs = (() => {
+          const start = extracted.targetEvent === "A" ? eventAStart : eventBStart;
+          const end   = extracted.targetEvent === "A" ? eventAEnd   : eventBEnd;
+          if (!start || !end) return 3_600_000;
+          return new Date(end).getTime() - new Date(start).getTime();
+        })();
+        const durationMinutes = Math.max(15, Math.round(sourceDurationMs / 60_000));
+
+        // If we have a specific time, reschedule immediately.
+        if (extracted.targetTime && chosenId && hasIds) {
+          const targetDate = date ?? (eventAStart?.slice(0, 10) ?? new Date().toISOString().slice(0, 10));
+          const newStart = `${targetDate}T${extracted.targetTime}:00`;
+          const newEndMs = new Date(newStart).getTime() + durationMinutes * 60_000;
+          const newEnd   = new Date(newEndMs).toISOString().replace(/\.\d{3}Z$/, "");
+          const tz       = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+          const updated = await updateEvent(chosenId, { start: newStart, end: newEnd, timeZone: tz });
+
+          const readable = new Date(newStart).toLocaleString("en-US", {
+            weekday: "short", month: "short", day: "numeric",
+            hour: "numeric", minute: "2-digit",
+          });
+
+          ok(res, {
+            action:      "rescheduled",
+            text:        `Done! **${updated.title}** moved to **${readable}**. The conflict is resolved — approve the item to dismiss it from your queue.`,
+            newStart:    updated.start,
+            eventId:     updated.id,
+          });
+          return;
+        }
+
+        // If we know which event but no time, suggest free slots.
+        const slotsDate = date ?? (eventAStart?.slice(0, 10) ?? new Date().toISOString().slice(0, 10));
+        const slotsResult = await listEvents(3);
+        const dayEvents = slotsResult.events.filter((e) => {
+          if (e.allDay) return false;
+          if (eventAId && e.id === eventAId) return false;
+          if (eventBId && e.id === eventBId) return false;
+          return e.start.startsWith(slotsDate);
+        });
+
+        const busy = dayEvents
+          .map((e) => ({ start: new Date(e.start).getTime(), end: new Date(e.end).getTime() }))
+          .sort((a, b) => a.start - b.start);
+
+        const dayStart = new Date(`${slotsDate}T08:00:00`).getTime();
+        const dayEnd   = new Date(`${slotsDate}T19:00:00`).getTime();
+        const slotMs   = durationMinutes * 60_000;
+        const slots: string[] = [];
+        let cursor = dayStart;
+
+        while (cursor + slotMs <= dayEnd && slots.length < 3) {
+          const slotEnd = cursor + slotMs;
+          const blocked = busy.some((b) => cursor < b.end && slotEnd > b.start);
+          if (!blocked) {
+            slots.push(new Date(cursor).toLocaleTimeString("en-US", {
+              hour: "numeric", minute: "2-digit", hour12: true,
+            }));
+            cursor = slotEnd;
+          } else {
+            const blocker = busy.find((b) => cursor < b.end && slotEnd > b.start)!;
+            cursor = blocker.end;
+          }
+        }
+
+        const target = chosenTitle ? `**${chosenTitle}**` : "that event";
+        const slotList = slots.length > 0
+          ? `Available slots on the same day: ${slots.join(", ")}.`
+          : "No free slots found for that day — try a different day.";
+
+        ok(res, {
+          action: "suggestions",
+          text:   `To reschedule ${target}, just tell me a time — e.g. "move it to 3pm". ${slotList}`,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[Pulse:Routes] POST /pulse/resolve-conflict: ${msg}`);
         err(res, msg);
       }
     },

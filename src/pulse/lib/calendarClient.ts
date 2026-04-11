@@ -256,6 +256,63 @@ export async function createEvent(
   };
 }
 
+/**
+ * Update the start/end time of an existing event (PATCH).
+ * Returns the updated CalendarEvent.
+ */
+export async function updateEvent(
+  eventId: string,
+  patch: { start: string; end: string; timeZone?: string },
+  calendarId = "primary"
+): Promise<CalendarEvent> {
+  const token = await refreshAccessToken();
+
+  const tz = patch.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const body = {
+    start: { dateTime: patch.start, timeZone: tz },
+    end:   { dateTime: patch.end,   timeZone: tz },
+  };
+
+  const resp = await fetch(
+    `${GCAL_BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    }
+  );
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`Calendar update HTTP ${resp.status}: ${text.slice(0, 200)}`);
+  }
+
+  const data = (await resp.json()) as {
+    id: string;
+    summary?: string;
+    start: { dateTime?: string; date?: string };
+    end:   { dateTime?: string; date?: string };
+    location?: string;
+    description?: string;
+    attendees?: Array<{ displayName?: string; email: string }>;
+  };
+
+  return {
+    id:          data.id,
+    title:       data.summary ?? "",
+    start:       data.start.dateTime ?? data.start.date ?? patch.start,
+    end:         data.end.dateTime   ?? data.end.date   ?? patch.end,
+    allDay:      !data.start.dateTime,
+    location:    data.location,
+    description: data.description,
+    attendees:   (data.attendees ?? []).map((a) => a.displayName ?? a.email),
+    calendarId,
+  };
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
