@@ -40,7 +40,8 @@ src/pulse/
 │   ├── PulseBackgroundService.ts   # Service: 6-hour processing loop (Gmail + Calendar)
 │   ├── GmailMcpService.ts          # Service: MCP client + 30-min token refresh heartbeat
 │   ├── CalendarMcpService.ts       # Service: Calendar MCP wrapper with response caching
-│   └── MorningBriefingService.ts   # Service: startup briefing posted to chat
+│   ├── MorningBriefingService.ts   # Service: startup briefing posted to chat
+│   └── DailySummaryService.ts      # Service: evening decision-pattern summary
 ├── evaluators/
 │   └── SlibGuardEvaluator.ts       # Evaluator (alwaysRun: true): scans every message
 ├── providers/
@@ -50,7 +51,8 @@ src/pulse/
 ├── actions/
 │   ├── ProcessEmailsAction.ts      # Action: manually trigger Gmail processing
 │   ├── DetectConflictsAction.ts    # Action: manually trigger calendar scan
-│   └── WebSearchAction.ts          # Action: DuckDuckGo + wttr.in, no API key required
+│   ├── WebSearchAction.ts          # Action: DuckDuckGo + wttr.in, no API key required
+│   └── CreateCalendarEventAction.ts # Action: create Google Calendar events via chat
 ├── routes/
 │   └── pulseRoutes.ts              # Routes: REST API (/pulse/queue, approve, reject, status)
 └── db/
@@ -61,10 +63,10 @@ src/pulse/
 
 **Plugin registration highlights:**
 
-- **4 Services** — background processing, MCP clients, morning briefing
+- **5 Services** — background processing, MCP clients, morning briefing, evening summary
 - **3 Providers** — queue state, decision history, and live web data injected into every prompt
 - **1 Evaluator** — `alwaysRun: true`, fires on every message to detect commitment language
-- **3 Actions** — email processing, conflict detection, web search
+- **4 Actions** — email processing, conflict detection, web search, calendar event creation
 - **REST Routes** — full CRUD API for the React dashboard
 - **Custom model handler** — `priority: 1` overrides `plugin-openai` to POST directly to `/v1/chat/completions`, bypassing `@ai-sdk/openai`'s Responses API default (which Nosana nodes don't support)
 
@@ -96,13 +98,15 @@ Every successful LLM call increments a persistent counter via `nosanaMetrics.ts`
     "nodeId": "3gsrmj...",
     "isNosanaNode": true,
     "llmCallCount": 47,
+    "avgLatencyMs": 812,
     "uptimeMs": 86400000,
-    "jobType": "morning"
+    "jobType": "morning",
+    "modelName": "Qwen3.5-27B-AWQ-4bit"
   }
 }
 ```
 
-The dashboard StatusBar renders: *"47 inferences run on Nosana GPU · Up 24h"*
+The sidebar GPU panel renders the model name, inference count, EMA latency, uptime, and job type. `avgLatencyMs` is an exponential moving average (α = 0.2) computed from wall-clock durations of each `/v1/chat/completions` call.
 
 ### Deployment
 
@@ -206,13 +210,14 @@ src/pulse/tests/persistence.test.ts       2 tests  DB migrations + CRUD round-tr
 │  │   GmailMcp         →    DecisionHistory       (alwaysRun)         │  │
 │  │   CalendarMcp      →    WebSearch                                 │  │
 │  │   MorningBriefing                                                 │  │
+│  │   DailySummary                                                    │  │
 │  │                                                                   │  │
 │  │   Actions                Routes                DB                 │  │
 │  │   ───────                ──────                ──                 │  │
 │  │   ProcessEmails          /pulse/queue          PGLite             │  │
 │  │   DetectConflicts        /pulse/approve        action_items       │  │
 │  │   WebSearch              /pulse/reject         commitments        │  │
-│  │                          /pulse/status         decisions          │  │
+│  │   CreateCalendarEvent    /pulse/status         decisions          │  │
 │  │                          /pulse/decisions                         │  │
 │  └────────────────────────────────────────────────────┬──────────────┘  │
 │                                                       │ :3000           │

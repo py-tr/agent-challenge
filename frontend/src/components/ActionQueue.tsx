@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from "react";
-import { Check, X, ChevronDown, ChevronUp, CheckCircle2, MessageSquare } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Check, X, ChevronDown, ChevronUp, CheckCircle2, MessageSquare, Mail, ArrowUpDown, GitBranch } from "lucide-react";
 import type { ActionItem, ActionItemType } from "../api/pulseApi";
 import { SlibGuardAlert } from "./SlibGuardAlert";
 
@@ -8,46 +8,41 @@ interface Props {
   loading: boolean;
   onApprove: (id: string) => Promise<void>;
   onReject: (id: string, reason?: string) => Promise<void>;
+  onDismiss?: (id: string) => Promise<void>;
   onAskPulse?: (title: string, body: string) => void;
+  onEmailReview?: (item: ActionItem) => void;
 }
 
 // ─── Type metadata ────────────────────────────────────────────────────────────
 
 const TYPE_META: Record<
-  ActionItemType,
+  Exclude<ActionItemType, "follow_up">,
   { label: string; cta: string; borderColor: string; badgeClass: string; filterLabel: string }
 > = {
   email_draft: {
     label: "Email Draft",
-    cta: "Review this draft before sending",
+    cta: "Draft ready to send — review before sending",
     borderColor: "#3b82f6",
     badgeClass: "bg-blue-50 text-blue-700 ring-1 ring-blue-200/60",
     filterLabel: "Email",
   },
   conflict_resolution: {
     label: "Calendar Conflict",
-    cta: "Reschedule needed",
+    cta: "Reschedule needed — approve to resolve",
     borderColor: "#ef4444",
     badgeClass: "bg-red-50 text-red-700 ring-1 ring-red-200/60",
     filterLabel: "Conflict",
   },
   slib_reminder: {
     label: "Commitment",
-    cta: "You made a commitment — approve to confirm it's handled",
+    cta: "Commitment reminder — approve to confirm handled",
     borderColor: "#f59e0b",
     badgeClass: "bg-amber-50 text-amber-700 ring-1 ring-amber-200/60",
     filterLabel: "Commitment",
   },
-  follow_up: {
-    label: "Follow-up",
-    cta: "No reply received — approve to follow up",
-    borderColor: "#8b5cf6",
-    badgeClass: "bg-purple-50 text-purple-700 ring-1 ring-purple-200/60",
-    filterLabel: "Follow-up",
-  },
 };
 
-type FilterType = ActionItemType | "all";
+type FilterType = Exclude<ActionItemType, "follow_up"> | "all";
 
 // ─── Filter pills ─────────────────────────────────────────────────────────────
 
@@ -60,7 +55,7 @@ function FilterPills({
   active: FilterType;
   onChange: (f: FilterType) => void;
 }) {
-  const types = (Object.keys(TYPE_META) as ActionItemType[]).filter((t) =>
+  const types = (Object.keys(TYPE_META) as Array<Exclude<ActionItemType, "follow_up">>).filter((t) =>
     items.some((i) => i.type === t)
   );
 
@@ -119,11 +114,6 @@ function FilterPill({
 }
 
 // ─── Markdown body renderer ───────────────────────────────────────────────────
-//
-// Security: NO dangerouslySetInnerHTML. Content flows from Gmail / Google
-// Calendar / user messages → LLM → DB → here, so it is untrusted. Bold
-// (**text**) is rendered as React <strong> elements; everything else is
-// plain text. React escapes all text nodes automatically.
 
 function renderBold(text: string): React.ReactNode {
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
@@ -165,14 +155,20 @@ type FlashState = "idle" | "approve" | "reject" | "exit";
 
 function ItemCard({
   item,
+  focused,
   onApprove,
   onReject,
+  onDismiss,
   onAskPulse,
+  onEmailReview,
 }: {
   item: ActionItem;
+  focused: boolean;
   onApprove: () => Promise<void>;
   onReject: (reason?: string) => Promise<void>;
+  onDismiss?: () => Promise<void>;
   onAskPulse?: () => void;
+  onEmailReview?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -180,10 +176,14 @@ function ItemCard({
   const [rejectReason, setRejectReason] = useState("");
   const [flash, setFlash] = useState<FlashState>("idle");
   const animTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const meta = TYPE_META[item.type] ?? TYPE_META.email_draft;
+  const meta = TYPE_META[item.type as Exclude<ActionItemType, "follow_up">] ?? TYPE_META.email_draft;
 
-  // M2: Clear animation timer if the card unmounts during the 200ms flash
-  // (e.g. optimistic remove fires before animation completes).
+  // Detect if this draft was auto-created from a conflict resolution
+  const sourceConflictTitle =
+    item.type === "email_draft"
+      ? (item.metadata?.sourceConflictTitle as string | undefined)
+      : undefined;
+
   useEffect(() => {
     return () => {
       if (animTimer.current) clearTimeout(animTimer.current);
@@ -212,18 +212,25 @@ function ItemCard({
     }
   }
 
+  async function handleDismiss() {
+    triggerExit("reject");
+    setBusy(true);
+    try { await onDismiss?.(); } finally { setBusy(false); }
+  }
+
   const preview = item.body
     .split("\n")
     .find((l) => l.trim().length > 0 && !l.startsWith("#"))
     ?.replace(/\*\*(.+?)\*\*/g, "$1")
     .slice(0, 180);
 
-  // Dynamic inline style: flash overrides the type-based left border color
   const cardStyle: React.CSSProperties =
     flash === "approve"
       ? { borderLeft: "4px solid #22c55e" }
       : flash === "reject"
       ? { borderLeft: "4px solid #ef4444" }
+      : focused
+      ? { borderLeft: `4px solid #4f46e5` }
       : { borderLeft: `4px solid ${meta.borderColor}` };
 
   const cardClass = [
@@ -231,14 +238,13 @@ function ItemCard({
     flash === "approve" ? "bg-green-50/70 border-green-200 shadow-sm" :
     flash === "reject"  ? "bg-red-50/70 border-red-200 shadow-sm" :
     flash === "exit"    ? "opacity-0 -translate-y-2 scale-[0.97] shadow-none pointer-events-none" :
+    focused             ? "bg-indigo-50/30 border-indigo-200 shadow-md" :
                           "bg-white border-gray-100 shadow-sm hover:shadow-md",
   ].join(" ");
 
   return (
     <article className={cardClass} style={cardStyle}>
-      {/* Card body */}
       <div className="p-5">
-        {/* Top row: badges left, timestamp + expand right */}
         <div className="flex items-start justify-between gap-3">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className={`badge ${meta.badgeClass}`}>{meta.label}</span>
@@ -253,6 +259,12 @@ function ItemCard({
                 P{item.priority}
               </span>
             )}
+            {sourceConflictTitle && (
+              <span className="inline-flex items-center gap-1 badge text-xs bg-violet-50 text-violet-600 ring-1 ring-violet-200/60">
+                <GitBranch size={10} />
+                From conflict
+              </span>
+            )}
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <span className="text-xs text-gray-400">{relativeTime(item.createdAt)}</span>
@@ -260,19 +272,20 @@ function ItemCard({
               onClick={() => setExpanded((v) => !v)}
               className="rounded-md p-1 text-gray-300 hover:bg-gray-100 hover:text-gray-500 transition-colors"
               title={expanded ? "Collapse" : "Expand"}
+              aria-label={expanded ? "Collapse item" : "Expand item"}
+              aria-expanded={expanded}
             >
               {expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
             </button>
           </div>
         </div>
 
-        {/* Title */}
         <h3 className="mt-3 text-base font-semibold leading-snug text-gray-900">{item.title}</h3>
 
-        {/* CTA */}
-        <p className="mt-1 text-xs italic text-gray-400">{meta.cta}</p>
+        <p className="mt-1 text-xs font-medium" style={{ color: meta.borderColor }}>
+          {meta.cta}
+        </p>
 
-        {/* Body */}
         {expanded ? (
           <div className="mt-3">
             <BodyRenderer text={item.body} />
@@ -284,7 +297,6 @@ function ItemCard({
         )}
       </div>
 
-      {/* Reject reason input */}
       {showRejectInput && (
         <div className="border-t border-gray-100 px-5 py-3">
           <input
@@ -302,9 +314,7 @@ function ItemCard({
         </div>
       )}
 
-      {/* Action bar */}
       <div className="flex items-center justify-between gap-2 border-t border-gray-100 bg-gray-50/60 px-5 py-3">
-        {/* Ask Pulse — left side */}
         {onAskPulse && !showRejectInput ? (
           <button
             onClick={onAskPulse}
@@ -318,10 +328,20 @@ function ItemCard({
           <div />
         )}
 
-        {/* Approve / Reject — right side */}
         <div className="flex items-center gap-2">
           {!showRejectInput ? (
             <>
+              {/* Skip (email drafts only) — semantically "I'll handle outside Pulse" */}
+              {item.type === "email_draft" && onDismiss && (
+                <button
+                  onClick={() => void handleDismiss()}
+                  disabled={busy}
+                  title="Skip — dismiss without rejecting. Handle outside Pulse."
+                  className="btn border border-gray-200 bg-white py-1.5 px-3.5 text-xs text-gray-500 hover:bg-gray-50 hover:border-gray-300 active:scale-[0.97] disabled:opacity-50"
+                >
+                  Skip
+                </button>
+              )}
               <button
                 onClick={() => setShowRejectInput(true)}
                 disabled={busy}
@@ -330,13 +350,24 @@ function ItemCard({
                 <X size={13} />
                 Reject
               </button>
-              <button
-                onClick={() => void handleApprove()}
-                disabled={busy}
-                className="btn-approve py-1.5 px-3.5 text-xs"
-              >
-                {busy ? "…" : (<><Check size={13} />Approve</>)}
-              </button>
+              {item.type === "email_draft" && onEmailReview ? (
+                <button
+                  onClick={onEmailReview}
+                  disabled={busy}
+                  className="btn py-1.5 px-3.5 text-xs bg-green-600 text-white hover:bg-green-700 active:scale-[0.97]"
+                >
+                  <Mail size={13} />
+                  Review &amp; Send
+                </button>
+              ) : (
+                <button
+                  onClick={() => void handleApprove()}
+                  disabled={busy}
+                  className="btn-approve py-1.5 px-3.5 text-xs"
+                >
+                  {busy ? "…" : (<><Check size={13} />Approve</>)}
+                </button>
+              )}
             </>
           ) : (
             <>
@@ -363,26 +394,106 @@ function ItemCard({
 
 // ─── Empty state ──────────────────────────────────────────────────────────────
 
-function EmptyState() {
+function EmptyState({ hasEverHadItems }: { hasEverHadItems: boolean }) {
   return (
     <div className="flex flex-col items-center justify-center rounded-xl border border-gray-100 bg-white px-8 py-24 text-center shadow-sm">
       <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-green-50">
         <CheckCircle2 size={32} className="text-green-500" />
       </div>
-      <h3 className="text-lg font-semibold text-gray-900">You're all caught up</h3>
-      <p className="mt-2 max-w-xs text-sm leading-relaxed text-gray-500">
-        Pulse will notify you when new items need your attention. Calendar conflicts, email
-        drafts, and commitment reminders will appear here.
-      </p>
+      {hasEverHadItems ? (
+        <>
+          <h3 className="text-lg font-semibold text-gray-900">You're all caught up</h3>
+          <p className="mt-2 max-w-xs text-sm leading-relaxed text-gray-500">
+            Pulse will add items here as emails arrive, calendar conflicts are detected,
+            and commitments come due.
+          </p>
+        </>
+      ) : (
+        <>
+          <h3 className="text-lg font-semibold text-gray-900">No items yet</h3>
+          <p className="mt-2 max-w-xs text-sm leading-relaxed text-gray-500">
+            Click <strong>Check for New Emails</strong> above to fetch and classify your inbox.
+            Pulse will create action items for anything that needs your attention.
+          </p>
+        </>
+      )}
       <p className="mt-4 text-xs text-gray-400">Nothing is sent or acted on without your approval</p>
     </div>
   );
 }
 
+// ─── Keyboard shortcut hint ───────────────────────────────────────────────────
+
+function KeyboardHint() {
+  return (
+    <p className="mb-3 text-right text-[10px] text-gray-400">
+      <kbd className="rounded border border-gray-200 bg-gray-50 px-1 py-0.5 font-mono text-[10px]">J</kbd>
+      {" / "}
+      <kbd className="rounded border border-gray-200 bg-gray-50 px-1 py-0.5 font-mono text-[10px]">K</kbd>
+      {" navigate · "}
+      <kbd className="rounded border border-gray-200 bg-gray-50 px-1 py-0.5 font-mono text-[10px]">A</kbd>
+      {" approve · "}
+      <kbd className="rounded border border-gray-200 bg-gray-50 px-1 py-0.5 font-mono text-[10px]">R</kbd>
+      {" reject"}
+    </p>
+  );
+}
+
 // ─── Action Queue ─────────────────────────────────────────────────────────────
 
-export function ActionQueue({ items, loading, onApprove, onReject, onAskPulse }: Props) {
+export function ActionQueue({ items, loading, onApprove, onReject, onDismiss, onAskPulse, onEmailReview }: Props) {
   const [filter, setFilter] = useState<FilterType>("all");
+  const [sortByPriority, setSortByPriority] = useState(false);
+  const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
+
+  const filtered = (() => {
+    const base = filter === "all" ? items : items.filter((i) => i.type === filter);
+    return sortByPriority ? [...base].sort((a, b) => a.priority - b.priority) : base;
+  })();
+
+  // Track whether items have ever existed (for empty state differentiation)
+  const hasEverHadItems = items.length > 0 || !loading;
+
+  // Keyboard navigation
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      // Don't fire when user is typing in an input/textarea
+      if (
+        document.activeElement instanceof HTMLInputElement ||
+        document.activeElement instanceof HTMLTextAreaElement
+      ) return;
+
+      if (filtered.length === 0) return;
+
+      if (e.key === "j" || e.key === "J") {
+        e.preventDefault();
+        setFocusedIdx((prev) =>
+          prev === null ? 0 : Math.min(prev + 1, filtered.length - 1)
+        );
+      } else if (e.key === "k" || e.key === "K") {
+        e.preventDefault();
+        setFocusedIdx((prev) =>
+          prev === null ? filtered.length - 1 : Math.max(prev - 1, 0)
+        );
+      } else if ((e.key === "a" || e.key === "A") && focusedIdx !== null) {
+        e.preventDefault();
+        const item = filtered[focusedIdx];
+        if (item) void onApprove(item.id);
+      } else if ((e.key === "r" || e.key === "R") && focusedIdx !== null) {
+        e.preventDefault();
+        const item = filtered[focusedIdx];
+        if (item) void onReject(item.id);
+      } else if (e.key === "Escape") {
+        setFocusedIdx(null);
+      }
+    },
+    [filtered, focusedIdx, onApprove, onReject]
+  );
+
+  useEffect(() => {
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
 
   if (loading) {
     return (
@@ -397,16 +508,30 @@ export function ActionQueue({ items, loading, onApprove, onReject, onAskPulse }:
     );
   }
 
-  if (items.length === 0) return <EmptyState />;
-
-  const filtered = filter === "all" ? items : items.filter((i) => i.type === filter);
+  if (items.length === 0) return <EmptyState hasEverHadItems={hasEverHadItems} />;
 
   return (
     <div>
-      <FilterPills items={items} active={filter} onChange={setFilter} />
+      <div className="mb-5 flex items-center justify-between">
+        <FilterPills items={items} active={filter} onChange={setFilter} />
+        <button
+          onClick={() => setSortByPriority((v) => !v)}
+          title={sortByPriority ? "Switch to chronological order" : "Sort by priority (P1 first)"}
+          className={`ml-auto flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors ${
+            sortByPriority
+              ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+              : "border-gray-200 bg-white text-gray-500 hover:border-gray-300 hover:text-gray-700"
+          }`}
+        >
+          <ArrowUpDown size={11} />
+          {sortByPriority ? "Priority order" : "Sort by priority"}
+        </button>
+      </div>
+
+      {filtered.length > 0 && <KeyboardHint />}
 
       <div className="space-y-4">
-        {filtered.map((item) =>
+        {filtered.map((item, idx) =>
           item.type === "slib_reminder" ? (
             <SlibGuardAlert
               key={item.id}
@@ -419,16 +544,19 @@ export function ActionQueue({ items, loading, onApprove, onReject, onAskPulse }:
             <ItemCard
               key={item.id}
               item={item}
+              focused={focusedIdx === idx}
               onApprove={() => onApprove(item.id)}
               onReject={(reason) => onReject(item.id, reason)}
+              onDismiss={onDismiss ? () => onDismiss(item.id) : undefined}
               onAskPulse={onAskPulse ? () => onAskPulse(item.title, item.body) : undefined}
+              onEmailReview={onEmailReview ? () => onEmailReview(item) : undefined}
             />
           )
         )}
 
         {filtered.length === 0 && filter !== "all" && (
           <p className="py-6 text-center text-sm text-gray-400">
-            No {TYPE_META[filter as ActionItemType]?.filterLabel.toLowerCase()} items pending
+            No {TYPE_META[filter as Exclude<ActionItemType, "follow_up">]?.filterLabel.toLowerCase()} items pending
           </p>
         )}
       </div>

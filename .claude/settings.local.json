@@ -14,7 +14,8 @@
       "Bash(docker push:*)",
       "Bash(docker run:*)",
       "Bash(node -e ':*)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(pnpm build:*)"
     ]
   }
 }

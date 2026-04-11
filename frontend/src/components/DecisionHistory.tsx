@@ -1,4 +1,4 @@
-import { TrendingUp } from "lucide-react";
+import { TrendingUp, Zap, CheckCircle, Shield } from "lucide-react";
 import type { DecisionsResponse, DecisionPattern, Decision } from "../api/pulseApi";
 
 interface Props {
@@ -101,6 +101,7 @@ function FullHistory({
   total: number;
   loading: boolean;
 }) {
+  const showInsights = total >= 3 && patterns.length > 0;
   return (
     <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
       {/* Timeline — 2/3 */}
@@ -150,10 +151,13 @@ function FullHistory({
         </div>
       </div>
 
-      {/* Patterns sidebar — 1/3 */}
-      <div className="lg:col-span-1">
+      {/* Right column — patterns + insights */}
+      <div className="lg:col-span-1 space-y-6">
         {total >= 5 && patterns.length > 0 && (
           <PatternSummary patterns={patterns} total={total} />
+        )}
+        {showInsights && (
+          <InsightsPanel patterns={patterns} decisions={decisions} />
         )}
       </div>
     </div>
@@ -205,6 +209,93 @@ function TimelineRow({ decision: d }: { decision: Decision }) {
         <p className="mt-0.5 text-xs text-gray-400">{relativeTime(d.decidedAt)}</p>
       </div>
     </li>
+  );
+}
+
+// ─── Insights panel ───────────────────────────────────────────────────────────
+
+interface InsightCardProps {
+  icon: React.ReactNode;
+  stat: string;
+  label: string;
+  accent: string; // tailwind text color
+}
+
+function InsightCard({ icon, stat, label, accent }: InsightCardProps) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
+      <span className={`shrink-0 ${accent}`}>{icon}</span>
+      <div className="min-w-0">
+        <p className={`text-sm font-bold tabular-nums ${accent}`}>{stat}</p>
+        <p className="text-xs text-gray-500 leading-tight">{label}</p>
+      </div>
+    </div>
+  );
+}
+
+function InsightsPanel({ patterns, decisions }: { patterns: DecisionPattern[]; decisions: Decision[] }) {
+  const emailPattern    = patterns.find((p) => p.type === "email_draft");
+  const conflictPattern = patterns.find((p) => p.type === "conflict_resolution");
+  const slibPattern     = patterns.find((p) => p.type === "slib_reminder");
+
+  const emailRate =
+    emailPattern && emailPattern.approved + emailPattern.rejected > 0
+      ? Math.round((emailPattern.approved / (emailPattern.approved + emailPattern.rejected)) * 100)
+      : null;
+
+  const conflictsResolved = conflictPattern?.approved ?? 0;
+  const commitmentsHonored = slibPattern?.approved ?? 0;
+
+  // Avg decision turnaround: impossible without item createdAt in the join,
+  // so show total unique days active instead.
+  const activeDays = new Set(decisions.map((d) => d.decidedAt.slice(0, 10))).size;
+
+  const insights: InsightCardProps[] = [
+    ...(emailRate !== null
+      ? [{
+          icon: <CheckCircle size={16} />,
+          stat: `${emailRate}%`,
+          label: "Email approval rate",
+          accent: emailRate >= 70 ? "text-green-600" : emailRate >= 40 ? "text-amber-600" : "text-red-500",
+        }]
+      : []),
+    {
+      icon: <Zap size={16} />,
+      stat: `${conflictsResolved}`,
+      label: "Conflicts resolved",
+      accent: "text-indigo-600",
+    },
+    {
+      icon: <Shield size={16} />,
+      stat: `${commitmentsHonored}`,
+      label: "Commitments honored",
+      accent: "text-amber-600",
+    },
+    {
+      icon: <TrendingUp size={16} />,
+      stat: `${activeDays}`,
+      label: activeDays === 1 ? "Active day" : "Active days",
+      accent: "text-blue-600",
+    },
+  ];
+
+  if (insights.length === 0) return null;
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
+      <div className="flex items-center gap-2 border-b border-gray-100 px-5 py-4">
+        <Zap size={15} className="text-indigo-400" />
+        <h2 className="text-sm font-semibold text-gray-900">Your Insights</h2>
+      </div>
+      <div className="space-y-2 p-4">
+        {insights.map((ins) => (
+          <InsightCard key={ins.label} {...ins} />
+        ))}
+      </div>
+      <p className="px-5 pb-4 text-[10px] text-gray-400 leading-relaxed">
+        Pulse learns from every decision you make. These patterns shape how it prioritises your queue.
+      </p>
+    </div>
   );
 }
 

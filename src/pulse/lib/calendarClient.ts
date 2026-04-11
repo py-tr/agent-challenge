@@ -173,6 +173,89 @@ async function mcpListEvents(
   }
 }
 
+// ─── Create Event ─────────────────────────────────────────────────────────────
+
+export interface NewCalendarEvent {
+  title: string;
+  /** ISO 8601 datetime, e.g. "2026-04-11T14:00:00" */
+  start: string;
+  /** ISO 8601 datetime */
+  end: string;
+  location?: string;
+  description?: string;
+  /** IANA timezone, e.g. "America/New_York". Defaults to "UTC". */
+  timeZone?: string;
+  attendees?: string[];   // email addresses
+}
+
+/**
+ * Create a new event on the primary Google Calendar via the REST API.
+ * Returns the created CalendarEvent (with its server-assigned id).
+ */
+export async function createEvent(
+  event: NewCalendarEvent,
+  calendarId = "primary"
+): Promise<CalendarEvent> {
+  const token = await refreshAccessToken();
+
+  const body: Record<string, unknown> = {
+    summary: event.title,
+    start: {
+      dateTime: event.start,
+      timeZone: event.timeZone ?? "UTC",
+    },
+    end: {
+      dateTime: event.end,
+      timeZone: event.timeZone ?? "UTC",
+    },
+  };
+
+  if (event.location) body.location = event.location;
+  if (event.description) body.description = event.description;
+  if (event.attendees && event.attendees.length > 0) {
+    body.attendees = event.attendees.map((email) => ({ email }));
+  }
+
+  const resp = await fetch(
+    `${GCAL_BASE}/calendars/${encodeURIComponent(calendarId)}/events`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    }
+  );
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`Calendar create HTTP ${resp.status}: ${text.slice(0, 200)}`);
+  }
+
+  const data = (await resp.json()) as {
+    id: string;
+    summary?: string;
+    start: { dateTime?: string; date?: string };
+    end: { dateTime?: string; date?: string };
+    location?: string;
+    description?: string;
+    attendees?: Array<{ displayName?: string; email: string }>;
+  };
+
+  return {
+    id:          data.id,
+    title:       data.summary ?? event.title,
+    start:       data.start.dateTime ?? data.start.date ?? event.start,
+    end:         data.end.dateTime ?? data.end.date ?? event.end,
+    allDay:      !data.start.dateTime,
+    location:    data.location,
+    description: data.description,
+    attendees:   (data.attendees ?? []).map((a) => a.displayName ?? a.email),
+    calendarId,
+  };
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**

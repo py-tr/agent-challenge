@@ -331,6 +331,55 @@ async function fetchMessageMetadata(
     .map((r) => r.value);
 }
 
+// ─── Send Email ───────────────────────────────────────────────────────────────
+
+/**
+ * Send an email via Gmail REST API.
+ *
+ * Builds a minimal RFC 2822 message with UTF-8 text/plain body, base64url-
+ * encodes the whole thing, and POSTs it to messages.send.
+ *
+ * @returns The Gmail message ID of the sent message.
+ */
+export async function sendEmail(
+  to: string,
+  subject: string,
+  body: string
+): Promise<string> {
+  const token = await refreshAccessToken();
+
+  // RFC 2822 headers + blank line + body.
+  // Using quoted-printable encoding declaration keeps the headers spec-valid
+  // even though we send raw UTF-8; Gmail's API is lenient about this.
+  const raw =
+    `To: ${to}\r\n` +
+    `Subject: ${subject}\r\n` +
+    `MIME-Version: 1.0\r\n` +
+    `Content-Type: text/plain; charset=UTF-8\r\n` +
+    `Content-Transfer-Encoding: 8bit\r\n` +
+    `\r\n` +
+    body;
+
+  const encoded = Buffer.from(raw).toString("base64url");
+
+  const resp = await fetch(`${GMAIL_BASE}/messages/send`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ raw: encoded }),
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`Gmail send HTTP ${resp.status}: ${text.slice(0, 200)}`);
+  }
+
+  const data = (await resp.json()) as { id: string };
+  return data.id;
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -346,7 +395,7 @@ export async function listMessages(maxResults = 10): Promise<GmailResult> {
       return { messages, path: "mcp" };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[GmailClient] MCP failed (${msg}), falling back to REST`);
+      console.error(`[Pulse:GmailClient] MCP failed (${msg}), falling back to REST`);
     }
   }
 
@@ -355,7 +404,7 @@ export async function listMessages(maxResults = 10): Promise<GmailResult> {
     return { messages, path: "rest" };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    console.error(`[GmailClient] REST also failed: ${error}`);
+    console.error(`[Pulse:GmailClient] REST also failed: ${error}`);
     return { messages: [], path: "cache", error };
   }
 }

@@ -50,12 +50,9 @@ function NosanaBadge({ nosana }: { nosana: NosanaMetrics }) {
   return (
     <div className="flex items-center gap-3">
       {/* Prominent Nosana chip */}
-      <a
-        href={nosana.nodeUrl ?? undefined}
-        target="_blank"
-        rel="noopener noreferrer"
-        title={`Nosana GPU node: ${nosana.nodeId}`}
-        className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-1.5 transition-colors hover:bg-green-100"
+      <div
+        title={`Nosana GPU node: ${nosana.nodeId ?? "unknown"}`}
+        className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-1.5"
       >
         {/* Pulsing green dot */}
         <span className="relative flex h-2.5 w-2.5 shrink-0">
@@ -66,7 +63,7 @@ function NosanaBadge({ nosana }: { nosana: NosanaMetrics }) {
         <span className="font-mono text-xs text-green-600" title={nosana.nodeId ?? ""}>
           {shortNodeId(nosana.nodeId)}
         </span>
-      </a>
+      </div>
 
       {/* Secondary stats */}
       <div className="hidden items-center gap-2 text-xs text-gray-400 sm:flex">

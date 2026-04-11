@@ -42,8 +42,20 @@ const MAX_EVENTS_IN_BRIEFING = 5;
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
+/** Structured data from the last briefing run — exposed via GET /pulse/briefing. */
+export interface BriefingData {
+  generatedAt: string;       // ISO timestamp
+  dateLabel: string;         // "Monday, April 14"
+  pendingItems: Array<{ type: string; title: string; priority: number }>;
+  todayEvents: Array<{ title: string; start: string; allDay: boolean }>;
+  urgentCommitments: Array<{ text: string; recipient: string | null; deadline: string }>;
+}
+
 export class MorningBriefingService extends Service {
   static readonly serviceType = "pulse-morning-briefing";
+
+  /** Latest briefing data — null until the first briefing runs (5s after startup). */
+  static lastBriefingData: BriefingData | null = null;
 
   readonly capabilityDescription =
     "Generates a daily morning briefing on startup summarising pending action " +
@@ -93,6 +105,15 @@ export class MorningBriefingService extends Service {
       this.fetchTodayEvents(),
       this.fetchUrgentCommitments(now),
     ]);
+
+    // Cache structured data so the /briefing API route can serve it.
+    MorningBriefingService.lastBriefingData = {
+      generatedAt: now.toISOString(),
+      dateLabel:   todayLabel,
+      pendingItems,
+      todayEvents:  todayEvents.map((e) => ({ title: e.title, start: e.start, allDay: e.allDay })),
+      urgentCommitments,
+    };
 
     this.printBriefing(todayLabel, pendingItems, todayEvents, urgentCommitments);
   }

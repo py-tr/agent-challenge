@@ -3,9 +3,9 @@
  * Shows Slib Guard–tracked commitments with due-date filtering.
  */
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Shield } from "lucide-react";
-import type { ActionItem } from "../api/pulseApi";
+import type { ActionItem, Decision } from "../api/pulseApi";
 import { SlibGuardAlert } from "./SlibGuardAlert";
 
 type Filter = "all" | "due_soon" | "overdue";
@@ -16,6 +16,60 @@ interface Props {
   onApprove: (id: string) => Promise<void>;
   onReject: (id: string, reason?: string) => Promise<void>;
   onAskPulse?: (title: string, body: string) => void;
+  /** Recent decisions — used to compute the commitment streak. */
+  decisions?: Decision[];
+}
+
+/** Count consecutive days (going back from today) that had ≥1 approved slib_reminder. */
+function computeStreak(decisions: Decision[]): number {
+  const honored = new Set(
+    decisions
+      .filter((d) => d.itemType === "slib_reminder" && d.decision === "approved")
+      .map((d) => d.decidedAt.slice(0, 10)) // YYYY-MM-DD
+  );
+
+  let streak = 0;
+  const today = new Date();
+  for (let i = 0; i < 30; i++) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    if (honored.has(key)) {
+      streak++;
+    } else {
+      break;
+    }
+  }
+  return streak;
+}
+
+function StreakBanner({ streak }: { streak: number }) {
+  if (streak >= 1) {
+    return (
+      <div className="mb-5 flex items-center gap-3 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3">
+        <span className="text-xl leading-none">🔥</span>
+        <div>
+          <p className="text-sm font-semibold text-amber-800">
+            {streak}-day streak
+          </p>
+          <p className="text-xs text-amber-600">
+            You've honored every commitment — keep it up!
+          </p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="mb-5 flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+      <span className="text-xl leading-none">🛡️</span>
+      <div>
+        <p className="text-sm font-semibold text-gray-700">Start your streak</p>
+        <p className="text-xs text-gray-500">
+          Handle today's commitments to begin your streak.
+        </p>
+      </div>
+    </div>
+  );
 }
 
 function deadlineDate(item: ActionItem): Date | null {
@@ -98,8 +152,9 @@ function EmptyState({ filtered }: { filtered: boolean }) {
   );
 }
 
-export function CommitmentsView({ items, loading, onApprove, onReject, onAskPulse }: Props) {
+export function CommitmentsView({ items, loading, onApprove, onReject, onAskPulse, decisions = [] }: Props) {
   const [filter, setFilter] = useState<Filter>("all");
+  const streak = useMemo(() => computeStreak(decisions), [decisions]);
 
   const overdueItems  = items.filter(isOverdue);
   const dueSoonItems  = items.filter(isDueSoon);
@@ -121,6 +176,9 @@ export function CommitmentsView({ items, loading, onApprove, onReject, onAskPuls
 
   return (
     <div>
+      {/* Streak banner */}
+      <StreakBanner streak={streak} />
+
       {/* Description */}
       <p className="mb-5 text-sm text-gray-500">
         Phrases you've committed to in emails, tracked by Slib Guard.

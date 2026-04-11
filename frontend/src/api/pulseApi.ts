@@ -44,12 +44,15 @@ export interface QueueResponse {
 
 export interface NosanaMetrics {
   nodeId: string | null;
-  nodeUrl: string | null;
   isNosanaNode: boolean;
   llmCallCount: number;
+  /** Exponential moving average of inference latency in ms. Null until first call. */
+  avgLatencyMs: number | null;
   uptimeMs: number;
   jobType: string;
   startedAt: string;
+  /** Active model display name (e.g. "Qwen3.5-27B-AWQ-4bit"). Never the API key or URL. */
+  modelName: string | null;
 }
 
 export interface StatusResponse {
@@ -57,6 +60,9 @@ export interface StatusResponse {
   gmail: { fetchedAt: string | null; messageCount: number };
   calendar: { fetchedAt: string | null; eventCount: number };
   agentName: string;
+  userDisplayName?: string;
+  /** Inbox health score 0–100 computed from decisions, queue, and commitments. */
+  score?: number;
   nosana: NosanaMetrics;
 }
 
@@ -64,6 +70,32 @@ export interface DecisionsResponse {
   decisions: Decision[];
   total: number;
   patterns: DecisionPattern[];
+}
+
+export interface BriefingData {
+  generatedAt: string;
+  dateLabel: string;
+  pendingItems: Array<{ type: string; title: string; priority: number }>;
+  todayEvents: Array<{ title: string; start: string; allDay: boolean }>;
+  urgentCommitments: Array<{ text: string; recipient: string | null; deadline: string }>;
+}
+
+export interface BriefingResponse {
+  briefing: BriefingData | null;
+}
+
+/** Passed to ChatDrawer when the user wants to review/edit and send an email draft. */
+export interface EmailDraftContext {
+  itemId: string;
+  to: string;
+  subject: string;
+  body: string;
+  /** Full "From" header — shown in the collapsible original-email panel. */
+  originalFrom?: string;
+  /** Date string from the original email. */
+  originalDate?: string;
+  /** Snippet of the original email body. */
+  originalSnippet?: string;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -87,7 +119,7 @@ export const pulseApi = {
     request<DecisionsResponse>(`/pulse/decisions?limit=${limit}`),
 
   approve: (id: string, reason?: string) =>
-    request<{ success: boolean; id: string; status: string }>(
+    request<{ success: boolean; id: string; status: string; draftCreated: boolean; draftRecipient: string | null }>(
       `/pulse/approve/${id}`,
       { method: "POST", body: JSON.stringify({ reason: reason ?? null }) }
     ),
@@ -101,6 +133,34 @@ export const pulseApi = {
   processInbox: () =>
     request<{ success: boolean; processed: number; inserted: number }>(
       `/pulse/process`,
+      { method: "POST" }
+    ),
+
+  sendEmail: (draft: EmailDraftContext) =>
+    request<{ success: boolean; messageId: string }>(
+      `/pulse/send-email`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          to:      draft.to,
+          subject: draft.subject,
+          body:    draft.body,
+          itemId:  draft.itemId,
+        }),
+      }
+    ),
+
+  suggestReplies: (params: { subject: string; from: string; bodySnippet: string }) =>
+    request<{ suggestions: string[] }>(
+      `/pulse/suggest-replies`,
+      { method: "POST", body: JSON.stringify(params) }
+    ),
+
+  getBriefing: () => request<BriefingResponse>("/pulse/briefing"),
+
+  dismiss: (id: string) =>
+    request<{ success: boolean; id: string; status: string }>(
+      `/pulse/dismiss/${id}`,
       { method: "POST" }
     ),
 };
@@ -165,8 +225,36 @@ export const agentApi = {
       `/api/messaging/sessions/${sessionId}/messages`,
       { method: "POST", body: JSON.stringify({ content, transport: "http" }), signal }
     );
-    // actionCallbacks.text contains action output (e.g. WEB_SEARCH results).
-    // Fall back to agentResponse.text which is the LLM's REPLY text.
-    return data.agentResponse?.actionCallbacks?.text || data.agentResponse?.text || "";
+    // Try multiple ElizaOS response shapes:
+    // 1. agentResponse.actionCallbacks.text  — action output (WEB_SEARCH etc.)
+    // 2. agentResponse.text                  — direct LLM reply (older format)
+    // 3. messages[].content where isAgent    — newer ElizaOS messaging format
+    const resp = data as unknown as Record<string, unknown>;
+    const ar = resp.agentResponse as Record<string, unknown> | undefined;
+    const actionText = (ar?.actionCallbacks as Record<string, unknown> | undefined)?.text as string | undefined;
+    const agentText  = ar?.text as string | undefined;
+    if (actionText) return actionText;
+    if (agentText)  return agentText;
+    // Newer format: { messages: [{ content, isAgent, createdAt }] }
+    const msgs = resp.messages as Array<{ content: string; isAgent: boolean }> | undefined;
+    if (Array.isArray(msgs)) {
+      const agentMsgs = msgs.filter((m) => m.isAgent);
+      if (agentMsgs.length > 0) return agentMsgs[agentMsgs.length - 1].content;
+    }
+    return "";
+  },
+
+  /**
+   * Fetch messages from a session that arrived after `after`.
+   * Returns the text of the latest agent message, or null if none yet.
+   * Used as a polling fallback when the frontend times out before the agent responds.
+   */
+  getMessages: async (sessionId: string, after: Date): Promise<string | null> => {
+    const data = await request<{
+      messages: Array<{ content: string; isAgent: boolean; createdAt: string }>;
+      hasMore: boolean;
+    }>(`/api/messaging/sessions/${sessionId}/messages?after=${encodeURIComponent(after.toISOString())}`);
+    const agentMsgs = data.messages.filter((m) => m.isAgent);
+    return agentMsgs.length > 0 ? agentMsgs[agentMsgs.length - 1].content : null;
   },
 };

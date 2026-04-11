@@ -183,6 +183,24 @@ export async function markReminderSent(
     .where(eq(commitments.id, commitmentId));
 }
 
+/** Commitment stats for inbox score: total vs handled (reminderSent = true). */
+export async function getCommitmentStats(
+  db: Db
+): Promise<{ total: number; handled: number }> {
+  const rows = await db
+    .select({ reminderSent: commitments.reminderSent, n: count() })
+    .from(commitments)
+    .groupBy(commitments.reminderSent);
+
+  let total = 0;
+  let handled = 0;
+  for (const row of rows) {
+    total += row.n;
+    if (row.reminderSent) handled += row.n;
+  }
+  return { total, handled };
+}
+
 /** All commitments without an associated action item — for debugging / tests. */
 export async function getUnqueuedCommitments(db: Db): Promise<Commitment[]> {
   return db

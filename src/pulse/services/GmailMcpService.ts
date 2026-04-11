@@ -27,6 +27,7 @@ import {
   refreshAccessToken,
   getProfile,
   listNewMessages,
+  sendEmail as gmailSendEmail,
   HistoryExpiredError,
 } from "../lib/gmailClient.js";
 import type { GmailMessage } from "../lib/gmailClient.js";
@@ -85,7 +86,6 @@ export class GmailMcpService extends Service {
       clearInterval(this.refreshInterval);
       this.refreshInterval = null;
     }
-    console.log("[Pulse:GmailMcpService] Stopped.");
   }
 
   // ─── Startup ────────────────────────────────────────────────────────────────
@@ -94,10 +94,9 @@ export class GmailMcpService extends Service {
     try {
       const db = this.runtime.db as unknown as Db;
       await runMigrations(db);
-      console.log("[Pulse:GmailMcpService] DB migrations verified.");
     } catch (err) {
-      console.warn(
-        "[Pulse:GmailMcpService] Migration warning:",
+      console.error(
+        "[Pulse:GmailMcpService] Migration error:",
         err instanceof Error ? err.message : String(err)
       );
     }
@@ -108,16 +107,14 @@ export class GmailMcpService extends Service {
 
     this.refreshInterval = setInterval(() => {
       void refreshAccessToken().catch((err) => {
-        console.warn(
+        console.error(
           "[Pulse:GmailMcpService] Token refresh heartbeat failed:",
           err instanceof Error ? err.message : String(err)
         );
       });
     }, TOKEN_REFRESH_INTERVAL_MS);
 
-    console.log(
-      "[Pulse:GmailMcpService] Started — token refresh every 30 min."
-    );
+    console.log("[Pulse:Routes] GmailMcpService started — token refresh every 30 min.");
   }
 
   // ─── Public API ─────────────────────────────────────────────────────────────
@@ -138,7 +135,6 @@ export class GmailMcpService extends Service {
 
     if (!storedHistoryId) {
       // ── Initial full fetch ───────────────────────────────────────────────
-      console.log("[Gmail] No history cursor — performing initial full fetch.");
       messages = await this.fullFetch(maxMessages);
       if (messages.length === 0) return [];
 
@@ -146,10 +142,9 @@ export class GmailMcpService extends Service {
       try {
         const profile = await getProfile();
         newHistoryId = profile.historyId;
-        console.log(`[Gmail] Anchoring history cursor at historyId=${newHistoryId}`);
       } catch (err) {
-        console.warn(
-          "[Gmail] Could not fetch profile for historyId anchor:",
+        console.error(
+          "[Pulse:GmailMcpService] Could not fetch profile for historyId anchor:",
           err instanceof Error ? err.message : String(err)
         );
         // Classify what we have even if we can't store a cursor.
@@ -157,18 +152,12 @@ export class GmailMcpService extends Service {
       }
     } else {
       // ── Incremental fetch via History API ────────────────────────────────
-      console.log(`[Gmail] Fetching history since historyId=${storedHistoryId}`);
       try {
         const result = await listNewMessages(storedHistoryId);
         messages = result.messages;
         newHistoryId = result.newHistoryId;
-        console.log(
-          `[Gmail] History returned ${messages.length} new message(s). ` +
-          `New historyId=${newHistoryId}`
-        );
       } catch (err) {
         if (err instanceof HistoryExpiredError) {
-          console.warn("[Gmail] History cursor expired — falling back to full fetch.");
           messages = await this.fullFetch(maxMessages);
           if (messages.length === 0) {
             // Still update cursor so next call doesn't re-expire immediately.
@@ -198,6 +187,15 @@ export class GmailMcpService extends Service {
   }
 
   /**
+   * Send an email via Gmail REST API.
+   * Delegates to gmailClient.sendEmail — exposed here so routes have a single
+   * service reference rather than importing the raw client directly.
+   */
+  async sendEmail(to: string, subject: string, body: string): Promise<string> {
+    return gmailSendEmail(to, subject, body);
+  }
+
+  /**
    * Returns when the last successful fetch happened (for StatusBar display).
    * null if no fetch has completed yet.
    */
@@ -223,24 +221,16 @@ export class GmailMcpService extends Service {
         fetchedAt: new Date().toISOString(),
       };
       await this.runtime.setCache<GmailCache>(CACHE_KEY, cache);
-      console.log(
-        `[Pulse:GmailMcpService] Fetched ${result.messages.length} messages via ${result.path}.`
-      );
+      console.log(`[Pulse:Routes] GmailMcpService fetched ${result.messages.length} messages via ${result.path}.`);
       return result.messages;
     }
 
     if (result.error) {
-      console.warn(
-        `[Pulse:GmailMcpService] Gmail unavailable (${result.error}). Trying cache…`
-      );
       const cached = await this.runtime.getCache<GmailCache>(CACHE_KEY);
       if (cached) {
-        console.log(
-          `[Pulse:GmailMcpService] Using cached messages from ${cached.fetchedAt}.`
-        );
         return cached.messages;
       }
-      console.warn("[Pulse:GmailMcpService] No cache available — returning empty.");
+      console.error(`[Pulse:GmailMcpService] Gmail unavailable (${result.error}) and no cache.`);
     }
 
     return [];

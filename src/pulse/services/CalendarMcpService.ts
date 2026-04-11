@@ -14,7 +14,7 @@
 
 import { Service } from "@elizaos/core";
 import type { IAgentRuntime } from "@elizaos/core";
-import { listEvents, type CalendarEvent } from "../lib/calendarClient.js";
+import { listEvents, createEvent, type CalendarEvent, type NewCalendarEvent } from "../lib/calendarClient.js";
 
 // ─── Cache Shape ──────────────────────────────────────────────────────────────
 
@@ -36,7 +36,6 @@ export class CalendarMcpService extends Service {
 
   static override async start(runtime: IAgentRuntime): Promise<Service> {
     const svc = new CalendarMcpService(runtime);
-    console.log("[Pulse:CalendarMcpService] Service started.");
     return svc;
   }
 
@@ -48,7 +47,7 @@ export class CalendarMcpService extends Service {
   }
 
   async stop(): Promise<void> {
-    console.log("[Pulse:CalendarMcpService] Service stopped.");
+    // No persistent resources to clean up.
   }
 
   // ── Public API ───────────────────────────────────────────────────────────────
@@ -72,17 +71,10 @@ export class CalendarMcpService extends Service {
         );
       }
 
-      console.log(
-        `[Pulse:CalendarMcpService] Fetched ${result.events.length} events ` +
-        `via ${result.path.toUpperCase()}.`
-      );
-
       return result.events;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn(
-        `[Pulse:CalendarMcpService] Live fetch failed (${msg}), using cache.`
-      );
+      console.error(`[Pulse:CalendarMcpService] Live fetch failed (${msg}), using cache.`);
       return this.getCachedEvents();
     }
   }
@@ -94,6 +86,19 @@ export class CalendarMcpService extends Service {
     );
     if (!cache) return { fetchedAt: null, eventCount: 0 };
     return { fetchedAt: cache.fetchedAt, eventCount: cache.events.length };
+  }
+
+  /**
+   * Create a new calendar event via the REST API.
+   * Invalidates the local cache so the next getEvents() reflects the new event.
+   */
+  async createEvent(event: NewCalendarEvent, calendarId?: string): Promise<CalendarEvent> {
+    const created = await createEvent(event, calendarId);
+    // Invalidate the cache so the next getEvents() does a fresh fetch.
+    // Using deleteCache rather than setCache(key, null) — null causes a DB insert error.
+    await this.runtime.deleteCache("pulse:calendar:last_fetch").catch(() => { /* ignore if key absent */ });
+    console.log(`[Pulse:Routes] CalendarMcpService created event "${created.title}" (id=${created.id})`);
+    return created;
   }
 
   // ── Internal ─────────────────────────────────────────────────────────────────

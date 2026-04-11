@@ -15,7 +15,7 @@ export interface QueueState {
   loading: boolean;
   error: string | null;
   lastUpdated: Date | null;
-  approve: (id: string) => Promise<void>;
+  approve: (id: string) => Promise<{ draftCreated: boolean; draftRecipient: string | null }>;
   reject: (id: string, reason?: string) => Promise<void>;
   refresh: () => void;
 }
@@ -61,18 +61,20 @@ export function useActionQueue(): QueueState {
     };
   }, [fetchAll]);
 
-  const approve = useCallback(async (id: string) => {
-    if (mutatingRef.current.has(id)) return;
+  const approve = useCallback(async (id: string): Promise<{ draftCreated: boolean; draftRecipient: string | null }> => {
+    if (mutatingRef.current.has(id)) return { draftCreated: false, draftRecipient: null };
     mutatingRef.current.add(id);
     try {
-      await pulseApi.approve(id);
+      const result = await pulseApi.approve(id);
       // Optimistic remove from queue
       setItems((prev) => prev.filter((i) => i.id !== id));
       // Refresh decisions in background
       void pulseApi.getDecisions(30).then(setDecisions).catch(() => null);
       void pulseApi.getStatus().then(setStatus).catch(() => null);
+      return { draftCreated: result.draftCreated ?? false, draftRecipient: result.draftRecipient ?? null };
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      return { draftCreated: false, draftRecipient: null };
     } finally {
       mutatingRef.current.delete(id);
     }
