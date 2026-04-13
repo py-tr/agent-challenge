@@ -200,10 +200,16 @@ export class PulseBackgroundService extends Service {
       `Task ID: ${this.taskId} · Cycle every ${CYCLE_INTERVAL_MS / 3_600_000}h`
     );
 
-    // 3. Auto-seed demo data when requested and the queue is empty.
+    // 3. Auto-seed demo data when requested OR when no Google credentials are
+    //    configured (so the dashboard is never empty on first launch).
     //    Runs before the first processing cycle so the dashboard is populated
     //    immediately on Nosana deployments without manual intervention.
-    if (process.env.PULSE_SEED_ON_START === "true") {
+    const hasGoogleCreds = Boolean(process.env.GOOGLE_REFRESH_TOKEN?.trim());
+    const seedFlag = process.env.PULSE_SEED_ON_START;
+    // Seed when explicitly enabled OR when no Google credentials are present,
+    // unless the flag is explicitly set to "false" (opt-out).
+    const shouldSeed = seedFlag === "true" || (seedFlag !== "false" && !hasGoogleCreds);
+    if (shouldSeed) {
       await this.maybeSeedDemo();
     }
 

@@ -38,7 +38,7 @@ export function createDb(dataDir: string): { db: Db; close: () => Promise<void> 
 
 // ─── Migrations ───────────────────────────────────────────────────────────────
 
-const CURRENT_VERSION = 1;
+const CURRENT_VERSION = 2;
 
 export async function runMigrations(db: Db): Promise<void> {
   // Version tracking table — created unconditionally first.
@@ -68,67 +68,90 @@ export async function runMigrations(db: Db): Promise<void> {
 
   // ── v1: initial Pulse schema ───────────────────────────────────────────────
 
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS pulse_action_items (
-      id          TEXT    PRIMARY KEY,
-      type        TEXT    NOT NULL,
-      title       TEXT    NOT NULL,
-      body        TEXT    NOT NULL DEFAULT '',
-      metadata    TEXT,
-      status      TEXT    NOT NULL DEFAULT 'pending',
-      priority    INTEGER NOT NULL DEFAULT 5,
-      created_at  TEXT    NOT NULL,
-      decided_at  TEXT
-    )
-  `);
+  if (existing < 1) {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS pulse_action_items (
+        id          TEXT    PRIMARY KEY,
+        type        TEXT    NOT NULL,
+        title       TEXT    NOT NULL,
+        body        TEXT    NOT NULL DEFAULT '',
+        metadata    TEXT,
+        status      TEXT    NOT NULL DEFAULT 'pending',
+        priority    INTEGER NOT NULL DEFAULT 5,
+        created_at  TEXT    NOT NULL,
+        decided_at  TEXT
+      )
+    `);
 
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS pulse_commitments (
-      id                TEXT    PRIMARY KEY,
-      source_message_id TEXT,
-      text              TEXT    NOT NULL,
-      recipient         TEXT,
-      deadline          TEXT    NOT NULL,
-      remind_at         TEXT    NOT NULL,
-      reminder_sent     BOOLEAN NOT NULL DEFAULT FALSE,
-      action_item_id    TEXT,
-      created_at        TEXT    NOT NULL
-    )
-  `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS pulse_commitments (
+        id                TEXT    PRIMARY KEY,
+        source_message_id TEXT,
+        text              TEXT    NOT NULL,
+        recipient         TEXT,
+        deadline          TEXT    NOT NULL,
+        remind_at         TEXT    NOT NULL,
+        reminder_sent     BOOLEAN NOT NULL DEFAULT FALSE,
+        action_item_id    TEXT,
+        created_at        TEXT    NOT NULL
+      )
+    `);
 
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS pulse_decisions (
-      id             TEXT PRIMARY KEY,
-      action_item_id TEXT NOT NULL,
-      decision       TEXT NOT NULL,
-      reason         TEXT,
-      decided_at     TEXT NOT NULL
-    )
-  `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS pulse_decisions (
+        id             TEXT PRIMARY KEY,
+        action_item_id TEXT NOT NULL,
+        decision       TEXT NOT NULL,
+        reason         TEXT,
+        decided_at     TEXT NOT NULL
+      )
+    `);
 
-  // Indexes for the most common query patterns.
-  await db.execute(sql`
-    CREATE INDEX IF NOT EXISTS idx_action_items_status
-      ON pulse_action_items (status, priority, created_at)
-  `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_action_items_status
+        ON pulse_action_items (status, priority, created_at)
+    `);
 
-  await db.execute(sql`
-    CREATE INDEX IF NOT EXISTS idx_commitments_remind_at
-      ON pulse_commitments (remind_at, reminder_sent)
-  `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_commitments_remind_at
+        ON pulse_commitments (remind_at, reminder_sent)
+    `);
 
-  await db.execute(sql`
-    CREATE INDEX IF NOT EXISTS idx_decisions_decided_at
-      ON pulse_decisions (decided_at DESC)
-  `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_decisions_decided_at
+        ON pulse_decisions (decided_at DESC)
+    `);
 
-  // Record applied version.
-  await db.execute(sql`
-    INSERT INTO pulse_schema_version (version, applied_at)
-    VALUES (${CURRENT_VERSION}, ${new Date().toISOString()})
-  `);
+    await db.execute(sql`
+      INSERT INTO pulse_schema_version (version, applied_at)
+      VALUES (1, ${new Date().toISOString()})
+    `);
 
-  console.log(`[Migrations] v${CURRENT_VERSION} applied successfully.`);
+    console.log(`[Migrations] v1 applied.`);
+  }
+
+  // ── v2: sent-draft style memory ────────────────────────────────────────────
+  // Singleton table: one row (id='singleton') holding a JSON array of the
+  // last N emails the user sent. Survives restarts; persisted via pulseRoutes.
+
+  if (existing < 2) {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS pulse_sent_drafts (
+        id          TEXT    PRIMARY KEY,
+        drafts_json TEXT    NOT NULL DEFAULT '[]',
+        updated_at  TEXT    NOT NULL
+      )
+    `);
+
+    await db.execute(sql`
+      INSERT INTO pulse_schema_version (version, applied_at)
+      VALUES (2, ${new Date().toISOString()})
+    `);
+
+    console.log(`[Migrations] v2 applied.`);
+  }
+
+  console.log(`[Migrations] Schema now at v${CURRENT_VERSION}.`);
 }
 
 // ─── Standalone Runner ────────────────────────────────────────────────────────

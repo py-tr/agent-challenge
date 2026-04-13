@@ -135,11 +135,11 @@ function TopBar({
             <button
               onClick={onProcessInbox}
               disabled={processingInbox}
-              title="Fetch new emails from Gmail and classify them into action items"
+              title="Run a full sync: fetch emails, detect calendar conflicts, and surface commitment reminders"
               className="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-600 transition-colors hover:border-indigo-300 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
             >
               <RefreshCw size={12} className={processingInbox ? "animate-spin" : ""} />
-              {processingInbox ? "Checking…" : "Check for New Emails"}
+              {processingInbox ? "Syncing…" : "Sync Now"}
             </button>
           )}
           <button

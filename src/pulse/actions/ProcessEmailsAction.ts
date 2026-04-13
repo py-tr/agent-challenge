@@ -1,28 +1,19 @@
 /**
  * src/pulse/actions/ProcessEmailsAction.ts
- * ElizaOS Action — manually trigger an email processing cycle.
+ * ElizaOS Action — manually trigger a full Pulse processing cycle.
  *
  * Trigger phrases (case-insensitive, checked in validate()):
  *   "process my emails", "check my emails", "check my inbox",
  *   "scan my inbox", "fetch emails", "process emails now"
  *
  * Flow:
- *   1. Acknowledge via callback ("Fetching emails…")
- *   2. Get GmailMcpService from runtime
- *   3. fetchAndClassify() → deduplicated ClassifiedEmail[]
- *   4. Write each to pulse_action_items via insertActionItem()
- *   5. Callback with summary ("Added 3 items to your queue")
- *
- * DB access:
- *   runtime.db is the Drizzle-over-PGLite instance registered by plugin-sql.
- *   Cast to our Db type is safe: the underlying class is identical; schema
- *   type parameters are erased at runtime.
+ *   Delegates entirely to PulseBackgroundService.runProcessingCycle() which
+ *   runs all three stages: emails, calendar conflicts, and Slib Guard reminders.
+ *   This ensures a manual trigger produces the same result as the scheduled cycle.
  */
 
 import type { Action, IAgentRuntime, Memory, State } from "@elizaos/core";
-import { GmailMcpService } from "../services/GmailMcpService.js";
-import { insertActionItem } from "../db/queries.js";
-import type { Db } from "../db/schema.js";
+import { PulseBackgroundService } from "../services/PulseBackgroundService.js";
 
 // ─── Trigger Detection ────────────────────────────────────────────────────────
 
@@ -52,9 +43,9 @@ function isEmailProcessRequest(text: string): boolean {
 export const processEmailsAction: Action = {
   name: "PROCESS_EMAILS",
   description:
-    "Fetch emails from Gmail, classify them into action items, follow-ups, " +
-    "or noise, and add the relevant items to the approval queue in PGLite. " +
-    "Triggered when the user asks to process, check, or scan their emails.",
+    "Run a full Pulse processing cycle: fetch and classify Gmail emails, " +
+    "detect calendar conflicts, and surface due Slib Guard commitment reminders. " +
+    "Triggered when the user asks to process, check, or scan their emails or inbox.",
 
   similes: [
     "FETCH_EMAILS",
@@ -63,6 +54,7 @@ export const processEmailsAction: Action = {
     "CHECK_INBOX",
     "PROCESS_INBOX",
     "READ_EMAILS",
+    "SYNC_INBOX",
   ],
 
   examples: [
@@ -74,7 +66,7 @@ export const processEmailsAction: Action = {
       {
         name: "Pulse",
         content: {
-          text: "Fetching and classifying your inbox on Nosana GPU…",
+          text: "Running a full sync — emails, calendar conflicts, and reminders…",
         },
       },
     ],
@@ -86,7 +78,7 @@ export const processEmailsAction: Action = {
       {
         name: "Pulse",
         content: {
-          text: "On it — scanning your inbox now.",
+          text: "On it — scanning emails, checking calendar conflicts, and reviewing commitments.",
         },
       },
     ],
@@ -111,106 +103,46 @@ export const processEmailsAction: Action = {
     _options?: Record<string, unknown>,
     callback?: (response: { text: string }) => Promise<unknown>
   ) => {
-    // ── Step 1: Acknowledge ──────────────────────────────────────────────────
     if (callback) {
       await callback({
-        text: "Fetching and classifying your emails on Nosana GPU…",
+        text: "Running a full sync on Nosana GPU — emails, calendar conflicts, and commitment reminders…",
       });
     }
 
     try {
-      // ── Step 2: Get Gmail service ──────────────────────────────────────────
-      const gmailService = runtime.getService<GmailMcpService>(
-        GmailMcpService.serviceType
+      const bgService = runtime.getService<PulseBackgroundService>(
+        PulseBackgroundService.serviceType
       );
 
-      if (!gmailService) {
-        const errMsg =
-          "Gmail service is not initialised. " +
-          "Ensure GmailMcpService is registered in pulsePlugin.services.";
+      if (!bgService) {
+        const errMsg = "PulseBackgroundService is not available.";
         console.error(`[Pulse:ProcessEmailsAction] ${errMsg}`);
         if (callback) await callback({ text: `⚠ ${errMsg}` });
         return { success: false, error: errMsg };
       }
 
-      // ── Step 3: Fetch + classify ───────────────────────────────────────────
-      const classified = await gmailService.fetchAndClassify();
+      const result = await bgService.runProcessingCycle();
 
-      if (classified.length === 0) {
-        const msg =
-          "No new emails to process. " +
-          "(Either your inbox is empty, Gmail credentials are not configured, " +
-          "or all messages have already been queued.)";
-        if (callback) await callback({ text: `✓ ${msg}` });
-        return { success: true, data: { processed: 0, inserted: 0 }, text: msg };
-      }
+      const parts: string[] = [];
+      if (result.emails.inserted > 0)
+        parts.push(`${result.emails.inserted} email${result.emails.inserted === 1 ? "" : "s"}`);
+      if (result.conflicts.inserted > 0)
+        parts.push(`${result.conflicts.inserted} calendar conflict${result.conflicts.inserted === 1 ? "" : "s"}`);
+      if (result.reminders.inserted > 0)
+        parts.push(`${result.reminders.inserted} commitment reminder${result.reminders.inserted === 1 ? "" : "s"}`);
 
-      // ── Step 4: Write to pulse_action_items ───────────────────────────────
-      // runtime.db is the PgliteDatabase instance registered by plugin-sql.
-      // The underlying Drizzle class is identical to our Db type.
-      const db = runtime.db as unknown as Db;
+      const summary = parts.length > 0
+        ? `Added ${parts.join(", ")} to your approval queue.`
+        : "Nothing new — your queue is up to date.";
 
-      let inserted = 0;
-      const errors: string[] = [];
-
-      for (const { message: msg, classification } of classified) {
-        if (!classification.actionItemType) continue; // noise/commitment
-
-        try {
-          await insertActionItem(db, {
-            type: classification.actionItemType,
-            title: msg.subject,
-            body: classification.body,
-            metadata: {
-              gmailMessageId: msg.id,
-              from: msg.from,
-              date: msg.date,
-              category: classification.category,
-            },
-            priority: classification.priority,
-          });
-          inserted++;
-        } catch (err) {
-          const errStr =
-            err instanceof Error ? err.message : String(err);
-          console.error(
-            `[Pulse:ProcessEmailsAction] Failed to insert item for "${msg.subject}": ${errStr}`
-          );
-          errors.push(errStr);
-        }
-      }
-
-      // ── Step 5: Reply with summary ────────────────────────────────────────
-      const totalFetched = classified.length + /* noise skipped implicitly */ 0;
-      const itemWord = inserted === 1 ? "item" : "items";
-      const summaryLine =
-        inserted === 0
-          ? "No new action items (all emails were already queued or classified as noise)."
-          : `Added ${inserted} ${itemWord} to your approval queue.`;
-
-      const replyText = `✓ Processed ${classified.length} email${classified.length === 1 ? "" : "s"}. ${summaryLine}`;
-
+      const replyText = `✓ Sync complete (${result.durationMs}ms). ${summary}`;
       if (callback) await callback({ text: replyText });
 
-      console.log(
-        `[Pulse:ProcessEmailsAction] Done — fetched=${classified.length}, inserted=${inserted}, errors=${errors.length}`
-      );
-
-      return {
-        success: errors.length === 0,
-        data: {
-          processed: classified.length,
-          inserted,
-          errors: errors.length > 0 ? errors : undefined,
-        },
-        text: summaryLine,
-      };
+      return { success: true, data: result as unknown as Record<string, unknown>, text: summary };
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error(`[Pulse:ProcessEmailsAction] Unexpected error: ${errMsg}`);
-      if (callback) {
-        await callback({ text: `Email processing failed: ${errMsg}` });
-      }
+      if (callback) await callback({ text: `Sync failed: ${errMsg}` });
       return { success: false, error: errMsg };
     }
   },

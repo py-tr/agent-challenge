@@ -144,7 +144,7 @@ Model: **Qwen3.5-27B-AWQ-4bit** running on Nosana GPU infrastructure.
 
 ```bash
 # Clone and install
-git clone https://github.com/pytrdev/agent-challenge
+git clone https://github.com/py-tr/agent-challenge
 cd agent-challenge && git checkout elizaos-challenge
 cp .env.example .env   # fill in credentials — see table below
 pnpm install
@@ -156,9 +156,20 @@ pnpm dev:hot
 pnpm dev
 ```
 
-Tip: add `PULSE_SEED_ON_START=true` to `.env` to auto-populate demo data on the first boot so the dashboard isn't empty.
-
 Open `http://localhost:5173` — the dashboard connects automatically.
+
+### Try it without Google credentials
+
+No Gmail or Calendar setup? No problem. If `GOOGLE_REFRESH_TOKEN` is not set, Pulse automatically seeds the dashboard with realistic demo data on first boot — a full inbox queue, calendar conflicts, Slib Guard reminders, and 7 days of analytics history. Everything is fully interactive: approve items, reject them, chat with the agent, try meeting prep — all without connecting a real account.
+
+| Scenario | What happens |
+|----------|-------------|
+| No `GOOGLE_REFRESH_TOKEN` | Demo data seeded automatically — dashboard is populated on first launch |
+| `PULSE_SEED_ON_START=true` | Force demo seed even when credentials are present (useful for testing) |
+| `PULSE_SEED_ON_START=false` | Never seed — start with an empty dashboard regardless |
+| `GOOGLE_REFRESH_TOKEN` set | Real Gmail + Calendar data only, no seeding |
+
+Demo data is only inserted when the queue is empty, so it never overwrites real items.
 
 ---
 
@@ -168,17 +179,16 @@ Open `http://localhost:5173` — the dashboard connects automatically.
 |----------|----------|-------------|
 | `OPENAI_API_KEY` | Yes | `nosana` for Nosana nodes, or your OpenAI key |
 | `OPENAI_API_URL` | Yes | Nosana node endpoint, e.g. `https://<node>.nos.ci/v1` |
-| `OPENAI_SMALL_MODEL` | Yes | `Qwen3.5-27B-AWQ-4bit` |
-| `OPENAI_LARGE_MODEL` | Yes | `Qwen3.5-27B-AWQ-4bit` |
+| `OPENAI_SMALL_MODEL` | No | Model name (default: `Qwen3.5-27B-AWQ-4bit`) |
+| `OPENAI_LARGE_MODEL` | No | Model name (default: `Qwen3.5-27B-AWQ-4bit`) |
 | `GOOGLE_CLIENT_ID` | No | Google OAuth client ID — enables "Sign in with Google" button |
 | `GOOGLE_CLIENT_SECRET` | No | Google OAuth client secret |
-| `GOOGLE_REFRESH_TOKEN` | No | Long-lived refresh token (set directly to skip OAuth) |
+| `GOOGLE_REFRESH_TOKEN` | No | Long-lived refresh token — set directly to skip the OAuth flow |
 | `PULSE_PUBLIC_URL` | No | Public base URL for OAuth redirect (e.g. `https://your-node.nos.ci`) |
 | `SERVER_PORT` | No | Backend port (default: `3000`) |
-| `PULSE_JOB_TYPE` | No | `morning` or `evening` — controls which processing mode runs |
-| `PULSE_SEED_ON_START` | No | `true` to auto-seed demo data on first boot (safe to leave on) |
-| `PULSE_PUBLIC_URL` | No | Public base URL for OAuth redirect (e.g. `https://your-node.nos.ci`) — overrides GitHub Pages relay |
-| `EMBEDDING_PROVIDER` | No | Set to `none` — embeddings not used |
+| `PULSE_JOB_TYPE` | No | `morning` or `evening` — logged in metrics, used by Nosana job definitions |
+| `PULSE_SEED_ON_START` | No | `true` = always seed demo data; `false` = never seed; unset = seed only when no Google credentials |
+| `EMBEDDING_PROVIDER` | No | Set to `none` — embeddings not required by Pulse |
 
 ### Google Authentication
 

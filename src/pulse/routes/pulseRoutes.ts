@@ -47,6 +47,7 @@ import type { Db } from "../db/schema.js";
 import type { ActionItem } from "../types.js";
 import { GmailMcpService } from "../services/GmailMcpService.js";
 import { CalendarMcpService } from "../services/CalendarMcpService.js";
+import { PulseBackgroundService } from "../services/PulseBackgroundService.js";
 import { MorningBriefingService } from "../services/MorningBriefingService.js";
 import { updateEvent, listEvents, deleteEvent } from "../lib/calendarClient.js";
 import {
@@ -72,11 +73,55 @@ const docStore = new Map<string, DocEntry>();
 // Stores the last STYLE_MEMORY_MAX emails the user actually sent so that
 // /draft-assist can inject them as style examples — teaching the agent
 // to write drafts that sound like the user over time.
-const sentDraftMemory: SentDraftEntry[] = [];
+// Persisted to PGLite (pulse_sent_drafts singleton row) so memory survives
+// process restarts — loaded lazily on first /draft-assist request.
 
-/** Prepend a sent draft to the module-level style-memory buffer. */
-function recordSentDraft(subject: string, body: string): void {
+const sentDraftMemory: SentDraftEntry[] = [];
+let sentDraftsLoadedFromDb = false;
+
+/** Load sentDraftMemory from PGLite on first use (lazy, runs once). */
+async function ensureSentDraftsLoaded(db: Db): Promise<void> {
+  if (sentDraftsLoadedFromDb) return;
+  sentDraftsLoadedFromDb = true; // set early to prevent concurrent loads
+  try {
+    const { sql } = await import("drizzle-orm");
+    const rows = await db.execute(
+      sql`SELECT drafts_json FROM pulse_sent_drafts WHERE id = 'singleton'`
+    );
+    const row = rows.rows[0] as { drafts_json?: string } | undefined;
+    if (row?.drafts_json) {
+      const loaded = JSON.parse(row.drafts_json) as SentDraftEntry[];
+      if (Array.isArray(loaded) && loaded.length > 0) {
+        sentDraftMemory.push(...loaded);
+      }
+    }
+  } catch {
+    // Non-fatal: DB may not have the table yet (pre-v2 installs) — proceed with empty memory.
+  }
+}
+
+/** Persist current sentDraftMemory to PGLite (fire-and-forget). */
+function persistSentDrafts(db: Db): void {
+  void (async () => {
+    try {
+      const { sql } = await import("drizzle-orm");
+      const json = JSON.stringify(sentDraftMemory);
+      const now  = new Date().toISOString();
+      await db.execute(sql`
+        INSERT INTO pulse_sent_drafts (id, drafts_json, updated_at)
+        VALUES ('singleton', ${json}, ${now})
+        ON CONFLICT (id) DO UPDATE SET drafts_json = ${json}, updated_at = ${now}
+      `);
+    } catch {
+      // Non-fatal: persistence failure should never crash the route.
+    }
+  })();
+}
+
+/** Prepend a sent draft to the style-memory buffer and persist to DB. */
+function recordSentDraft(subject: string, body: string, db?: Db): void {
   _recordSentDraft(sentDraftMemory, subject, body);
+  if (db) persistSentDrafts(db);
 }
 
 // ─── Frontend static-file serving ────────────────────────────────────────────
@@ -598,9 +643,8 @@ export const pulseRoutes: Route[] = [
   },
 
   // ── POST /pulse/process ───────────────────────────────────────────────────
-  // Manually trigger inbox processing: fetch + classify emails, insert action
-  // items for anything that needs a decision. Called by the "Process Inbox"
-  // button in the dashboard.
+  // Manually trigger a full Pulse processing cycle: emails, calendar conflicts,
+  // and Slib Guard reminders. Called by the "Check for New Emails" button.
   {
     type: "POST",
     path: "/process",
@@ -610,52 +654,27 @@ export const pulseRoutes: Route[] = [
       runtime: IAgentRuntime
     ) => {
       try {
-        const gmailSvc = runtime.getService(
-          GmailMcpService.serviceType
-        ) as GmailMcpService | null;
+        const bgSvc = runtime.getService(
+          PulseBackgroundService.serviceType
+        ) as PulseBackgroundService | null;
 
-        if (!gmailSvc) {
-          err(res, "GmailMcpService not available", 503);
+        if (!bgSvc) {
+          err(res, "PulseBackgroundService not available", 503);
           return;
         }
 
-        console.log("[Pulse:Routes] POST /pulse/process — fetching and classifying inbox…");
-        const classified = await gmailSvc.fetchAndClassify();
+        console.log("[Pulse:Routes] POST /pulse/process — running full processing cycle…");
+        const result = await bgSvc.runProcessingCycle();
 
-        if (classified.length === 0) {
-          console.log("[Pulse:Routes] /process — no new emails to process.");
-          ok(res, { success: true, processed: 0, inserted: 0 });
-          return;
-        }
-
-        const db = runtime.db as unknown as Db;
-        let inserted = 0;
-
-        for (const { message: msg, classification } of classified) {
-          if (!classification.actionItemType) continue;
-          try {
-            await insertActionItem(db, {
-              type:     classification.actionItemType,
-              title:    msg.subject,
-              body:     classification.body,
-              metadata: {
-                gmailMessageId: msg.id,
-                from:           msg.from,
-                date:           msg.date,
-                category:       classification.category,
-                ...(classification.metadata ?? {}),
-              },
-              priority: classification.priority,
-            });
-            inserted++;
-          } catch (insertErr) {
-            const insertMsg = insertErr instanceof Error ? insertErr.message : String(insertErr);
-            console.error(`[Pulse:Routes] Failed to insert item for "${msg.subject}": ${insertMsg}`);
-          }
-        }
-
-        console.log(`[Pulse:Routes] /process complete — ${classified.length} classified, ${inserted} inserted.`);
-        ok(res, { success: true, processed: classified.length, inserted });
+        ok(res, {
+          success: true,
+          processed:  result.emails.processed,
+          inserted:   result.emails.inserted + result.conflicts.inserted + result.reminders.inserted,
+          emails:     result.emails,
+          conflicts:  result.conflicts,
+          reminders:  result.reminders,
+          durationMs: result.durationMs,
+        });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         console.error(`[Pulse:Routes] POST /pulse/process: ${msg}`);
@@ -738,7 +757,7 @@ export const pulseRoutes: Route[] = [
           reason:         "Email sent",
         });
 
-        recordSentDraft(subject, emailBody);
+        recordSentDraft(subject, emailBody, db);
         console.log(`[Pulse:Routes] Sent email for item ${itemId}, messageId=${messageId}`);
         ok(res, { success: true, messageId });
       } catch (e) {
@@ -889,6 +908,10 @@ export const pulseRoutes: Route[] = [
           err(res, "instruction is required", 400);
           return;
         }
+
+        // Load persisted draft memory from DB on first request (lazy, once per process).
+        const db = runtime.db as unknown as Db;
+        await ensureSentDraftsLoaded(db);
 
         // Build a self-contained prompt that instructs the model to act as a
         // focused email editor. All context is in the user message so the
@@ -1505,8 +1528,9 @@ export const pulseRoutes: Route[] = [
           .filter((d): d is DocEntry & { base64: string } => d !== undefined && d.base64 !== undefined)
           .map((d) => ({ filename: d.filename, base64: d.base64, mimeType: "application/pdf" }));
 
+        const db = runtime.db as unknown as Db;
         const messageId = await gmailSvc.sendEmail(to.trim(), subject.trim(), emailBody.trim(), attachments.length ? attachments : undefined);
-        recordSentDraft(subject.trim(), emailBody.trim());
+        recordSentDraft(subject.trim(), emailBody.trim(), db);
         console.log(`[Pulse:Routes] send-direct → ${to}, messageId=${messageId}`);
         ok(res, { success: true, messageId });
       } catch (e) {
