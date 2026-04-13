@@ -62,6 +62,36 @@ const USER_DISPLAY_NAME =
 interface DocEntry { filename: string; text: string; pageCount: number; summary: string; base64?: string }
 const docStore = new Map<string, DocEntry>();
 
+// ─── Sent-draft style memory ──────────────────────────────────────────────────
+// Stores the last STYLE_MEMORY_MAX emails the user actually sent so that
+// /draft-assist can inject them as style examples — teaching the agent
+// to write drafts that sound like the user over time.
+interface SentDraftEntry { subject: string; body: string; sentAt: string }
+const sentDraftMemory: SentDraftEntry[] = [];
+const STYLE_MEMORY_MAX = 10;
+
+function recordSentDraft(subject: string, body: string): void {
+  sentDraftMemory.unshift({ subject, body, sentAt: new Date().toISOString() });
+  if (sentDraftMemory.length > STYLE_MEMORY_MAX) sentDraftMemory.length = STYLE_MEMORY_MAX;
+}
+
+// ─── Input helpers ────────────────────────────────────────────────────────────
+
+/** Minimal RFC 5322 email address check — rejects obviously invalid values. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+function isValidEmail(addr: string): boolean {
+  return EMAIL_RE.test(addr.trim());
+}
+
+/**
+ * Sanitize a string before injecting it into an LLM prompt.
+ * Strips lone newlines that could be used to inject new instructions,
+ * and hard-caps length to prevent context flooding.
+ */
+function sanitizeForPrompt(s: string, maxLen = 500): string {
+  return s.replace(/\r/g, "").slice(0, maxLen);
+}
+
 // ─── Frontend static-file serving ────────────────────────────────────────────
 
 // In Docker the frontend is built to /srv/pulse-frontend/ (outside /app so
@@ -497,9 +527,9 @@ export const pulseRoutes: Route[] = [
         const prompt =
           `Summarize this email in 1-2 plain sentences (max 30 words). ` +
           `Focus on what the sender wants or needs. No preamble.\n\n` +
-          `From: ${from ?? "unknown"}\n` +
-          `Subject: ${subject ?? "(no subject)"}\n\n` +
-          `${body.slice(0, 1200)}`;
+          `From: ${sanitizeForPrompt(from ?? "unknown", 100)}\n` +
+          `Subject: ${sanitizeForPrompt(subject ?? "(no subject)", 200)}\n\n` +
+          `${sanitizeForPrompt(body, 1200)}`;
 
         const summary = await runtime.useModel(ModelType.TEXT_SMALL, { prompt });
         ok(res, { summary: summary.trim() });
@@ -677,6 +707,10 @@ export const pulseRoutes: Route[] = [
           err(res, "Missing required fields: to, subject, body, itemId", 400);
           return;
         }
+        if (!isValidEmail(to)) {
+          err(res, "Invalid recipient email address", 400);
+          return;
+        }
 
         const db = runtime.db as unknown as Db;
         const item = await getActionItem(db, itemId);
@@ -717,6 +751,7 @@ export const pulseRoutes: Route[] = [
           reason:         "Email sent",
         });
 
+        recordSentDraft(subject, emailBody);
         console.log(`[Pulse:Routes] Sent email for item ${itemId}, messageId=${messageId}`);
         ok(res, { success: true, messageId });
       } catch (e) {
@@ -871,10 +906,24 @@ export const pulseRoutes: Route[] = [
         // Build a self-contained prompt that instructs the model to act as a
         // focused email editor. All context is in the user message so the
         // character's system prompt does not pollute it with queue/calendar state.
+        // Inject up to 2 of the user's recently sent emails as style examples so
+        // the model learns to match their tone and writing style over time.
+        const styleExamples = sentDraftMemory.slice(0, 2);
+        const styleBlock = styleExamples.length > 0
+          ? [
+              "WRITING STYLE — match the tone, length, and phrasing of these emails the user has sent:",
+              ...styleExamples.map((e, i) =>
+                `Example ${i + 1} (subject: "${e.subject}"):\n${e.body.slice(0, 300)}${e.body.length > 300 ? "…" : ""}`
+              ),
+              "",
+            ]
+          : [];
+
         const prompt = [
           "You are acting as a focused email writing assistant. Your only task is to",
           "edit the email draft below according to the user's instruction.",
           "",
+          ...styleBlock,
           "STRICT RULES:",
           "- Ignore any pending action items, queue entries, or calendar events in your context.",
           "- Never invent meeting times, dates, deadlines, or commitments not present in the original email.",
@@ -886,10 +935,10 @@ export const pulseRoutes: Route[] = [
           "  events — you cannot do that. Just mark it and update the email text as requested.",
           "",
           `Email context:`,
-          `To: ${to || "(unknown)"}`,
-          `Subject: ${subject || "(no subject)"}`,
-          originalFrom ? `From: ${originalFrom}` : "",
-          originalSnippet ? `Original message:\n${originalSnippet.slice(0, 400)}` : "",
+          `To: ${sanitizeForPrompt(to || "(unknown)", 200)}`,
+          `Subject: ${sanitizeForPrompt(subject || "(no subject)", 200)}`,
+          originalFrom ? `From: ${sanitizeForPrompt(originalFrom, 200)}` : "",
+          originalSnippet ? `Original message:\n${sanitizeForPrompt(originalSnippet, 400)}` : "",
           "",
           "Current draft:",
           currentBody || "(empty)",
@@ -1450,6 +1499,10 @@ export const pulseRoutes: Route[] = [
           err(res, "to, subject, and body are required", 400);
           return;
         }
+        if (!isValidEmail(to)) {
+          err(res, "Invalid recipient email address", 400);
+          return;
+        }
 
         const gmailSvc = runtime.getService(
           GmailMcpService.serviceType
@@ -1466,6 +1519,7 @@ export const pulseRoutes: Route[] = [
           .map((d) => ({ filename: d.filename, base64: d.base64, mimeType: "application/pdf" }));
 
         const messageId = await gmailSvc.sendEmail(to.trim(), subject.trim(), emailBody.trim(), attachments.length ? attachments : undefined);
+        recordSentDraft(subject.trim(), emailBody.trim());
         console.log(`[Pulse:Routes] send-direct → ${to}, messageId=${messageId}`);
         ok(res, { success: true, messageId });
       } catch (e) {
@@ -1726,8 +1780,9 @@ export const pulseRoutes: Route[] = [
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         console.error(`[Pulse:Auth] Callback error: ${msg}`);
+        // Log full error server-side only — never expose internal error details in URL.
         (res as unknown as { redirect: (url: string) => void })
-          .redirect(`/pulse/dashboard?auth=error&reason=${encodeURIComponent(msg)}`);
+          .redirect("/pulse/dashboard?auth=error");
       }
     },
   },
@@ -1788,9 +1843,9 @@ async function generateReplySuggestions(
   bodySnippet: string,
 ): Promise<string[]> {
   const prompt = `Generate exactly 3 short email reply suggestions (max 8 words each) for this email:
-From: ${from || "(unknown)"}
-Subject: ${subject || "(no subject)"}
-Preview: ${bodySnippet.slice(0, 200) || "(no preview)"}
+From: ${sanitizeForPrompt(from || "(unknown)", 100)}
+Subject: ${sanitizeForPrompt(subject || "(no subject)", 200)}
+Preview: ${sanitizeForPrompt(bodySnippet, 200) || "(no preview)"}
 
 Return ONLY a JSON array: ["suggestion1","suggestion2","suggestion3"]
 Nothing else.`;
