@@ -305,34 +305,6 @@ export async function getWeeklyDecisions(
   return result;
 }
 
-/** Check if a follow_up item already exists for a given Gmail thread/message ID. */
-export async function followUpExistsForThread(
-  db: Db,
-  gmailThreadId: string
-): Promise<boolean> {
-  const rows = await db
-    .select({ id: actionItems.id })
-    .from(actionItems)
-    .where(
-      and(
-        eq(actionItems.type, "follow_up"),
-        eq(actionItems.status, "pending")
-      )
-    )
-    .limit(50);
-
-  return rows.some((r) => {
-    try {
-      const meta = db
-        .select({ metadata: actionItems.metadata })
-        .from(actionItems)
-        .where(eq(actionItems.id, r.id));
-      void meta; // just check via the metadata string match below
-    } catch { /* ignore */ }
-    return false;
-  });
-}
-
 /**
  * Check if a follow_up item exists for a thread by scanning metadata JSON.
  * Lightweight: only looks at pending follow_up items.

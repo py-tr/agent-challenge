@@ -49,6 +49,12 @@ import { GmailMcpService } from "../services/GmailMcpService.js";
 import { CalendarMcpService } from "../services/CalendarMcpService.js";
 import { MorningBriefingService } from "../services/MorningBriefingService.js";
 import { updateEvent, listEvents, deleteEvent } from "../lib/calendarClient.js";
+import {
+  isValidEmail,
+  sanitizeForPrompt,
+  recordSentDraft as _recordSentDraft,
+  type SentDraftEntry,
+} from "../lib/routeHelpers.js";
 
 /** Display name used in outgoing email signatures. Configurable via env. */
 const USER_DISPLAY_NAME =
@@ -66,30 +72,11 @@ const docStore = new Map<string, DocEntry>();
 // Stores the last STYLE_MEMORY_MAX emails the user actually sent so that
 // /draft-assist can inject them as style examples — teaching the agent
 // to write drafts that sound like the user over time.
-interface SentDraftEntry { subject: string; body: string; sentAt: string }
 const sentDraftMemory: SentDraftEntry[] = [];
-const STYLE_MEMORY_MAX = 10;
 
+/** Prepend a sent draft to the module-level style-memory buffer. */
 function recordSentDraft(subject: string, body: string): void {
-  sentDraftMemory.unshift({ subject, body, sentAt: new Date().toISOString() });
-  if (sentDraftMemory.length > STYLE_MEMORY_MAX) sentDraftMemory.length = STYLE_MEMORY_MAX;
-}
-
-// ─── Input helpers ────────────────────────────────────────────────────────────
-
-/** Minimal RFC 5322 email address check — rejects obviously invalid values. */
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-function isValidEmail(addr: string): boolean {
-  return EMAIL_RE.test(addr.trim());
-}
-
-/**
- * Sanitize a string before injecting it into an LLM prompt.
- * Strips lone newlines that could be used to inject new instructions,
- * and hard-caps length to prevent context flooding.
- */
-function sanitizeForPrompt(s: string, maxLen = 500): string {
-  return s.replace(/\r/g, "").slice(0, maxLen);
+  _recordSentDraft(sentDraftMemory, subject, body);
 }
 
 // ─── Frontend static-file serving ────────────────────────────────────────────

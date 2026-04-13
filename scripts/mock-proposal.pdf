@@ -1,0 +1,347 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>
+endobj
+
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]
+   /Contents 6 0 R /Resources << /Font << /F1 9 0 R /F2 10 0 R >> >> >>
+endobj
+
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]
+   /Contents 7 0 R /Resources << /Font << /F1 9 0 R /F2 10 0 R >> >> >>
+endobj
+
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]
+   /Contents 8 0 R /Resources << /Font << /F1 9 0 R /F2 10 0 R >> >> >>
+endobj
+
+6 0 obj
+<< /Length 2182 >>
+stream
+BT
+/F2 14 Tf
+50 740 Td
+(STRATEGIC PARTNERSHIP PROPOSAL) Tj
+0 -18 Td
+/F1 9 Tf
+0 0 Td
+(Prepared by: Pulse AI   |   For: Nexora Capital   |   Confidential) Tj
+0 -14 Td
+/F1 9 Tf
+0 0 Td
+(Date: April 14, 2026   |   Reference: NXC-2026-04-PULSE) Tj
+0 -30 Td
+/F2 12 Tf
+0 0 Td
+(1. Executive Summary) Tj
+0 -18 Td
+/F1 10 Tf
+0 0 Td
+(Pulse AI proposes a strategic partnership with Nexora Capital to deploy an AI-powered) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(executive productivity suite across Nexora's 12-firm portfolio. The system provides) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(autonomous inbox triage, calendar conflict resolution, and commitment tracking,) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(running entirely on Nosana's decentralised GPU network.) Tj
+0 -24 Td
+/F1 10 Tf
+0 0 Td
+(Proposed deal terms: EUR 480,000 annual licence \(40 seats\). Pilot: 5 seats, 60 days,) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(no charge. Full deployment target: July 1, 2026.) Tj
+0 -30 Td
+/F2 12 Tf
+0 0 Td
+(2. Problem Statement) Tj
+0 -18 Td
+/F1 10 Tf
+0 0 Td
+(Portfolio executives spend an average of 3.2 hours per day on email triage and) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(scheduling  time that could be redirected to capital allocation decisions.) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(Missed follow-ups and double-booked meetings cost an estimated EUR 1.2M per year) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(in rescheduling overhead and lost deal velocity across the portfolio.) Tj
+0 -30 Td
+/F2 12 Tf
+0 0 Td
+(3. Proposed Solution) Tj
+0 -18 Td
+/F1 10 Tf
+0 0 Td
+(Pulse deploys as an ElizaOS plugin running on-premise within each firm's cloud) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(environment. LLM inference runs on Nosana GPU nodes  no data leaves the client) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(environment to third-party AI providers. Key capabilities:) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(  - Email classification and draft generation \(action-required / follow-up / noise\)) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(  - Calendar conflict detection with one-click resolution) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(  - Commitment tracking: surfaces broken promises before they become problems) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(  - Morning briefing: spoken or written daily digest of priorities) Tj
+ET
+endstream
+endobj
+
+7 0 obj
+<< /Length 2015 >>
+stream
+BT
+/F2 12 Tf
+50 740 Td
+(4. Commercial Terms) Tj
+0 -20 Td
+/F1 10 Tf
+0 0 Td
+(Licence Model:       SaaS annual subscription, per-seat pricing) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(Pilot \(5 seats\):     Complimentary - 60 days from contract signature) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(Full licence:        EUR 12,000 per seat per year \(min. 10 seats\)) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(Portfolio discount:  15% for 12+ firms signing simultaneously) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(Payment:             Annual upfront, invoice on go-live date) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(SLA:                 99.5% uptime, 4-hour incident response) Tj
+0 -30 Td
+/F2 12 Tf
+0 0 Td
+(5. Implementation Timeline) Tj
+0 -20 Td
+/F1 10 Tf
+0 0 Td
+(Week 1-2   \(April 14-25\):   Legal review and contract signature) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(Week 3-4   \(April 28-May 9\): OAuth credential setup and data access config) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(Week 5-6   \(May 12-23\):     Pilot deployment at Nexora Capital HQ \(5 seats\)) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(Week 7-8   \(May 26-June 6\): Pilot evaluation, feedback collection) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(Week 9-10  \(June 9-20\):     Portfolio-wide rollout planning) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(Week 11-12 \(June 23-July 1\): Full deployment - 40 seats across 4 firms) Tj
+0 -30 Td
+/F2 12 Tf
+0 0 Td
+(6. Key Contacts & Approvals Required) Tj
+0 -20 Td
+/F1 10 Tf
+0 0 Td
+(Nexora Capital - Decision makers who must sign off:) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(  - Marcus Veld \(Managing Partner\) - commercial approval above EUR 200k) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(  - Sophie Hartmann \(CTO\) - technical due diligence sign-off) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(  - Legal team \(attn. Daniel Roos\) - data processing agreement \(DPA\)) Tj
+0 -28 Td
+/F1 10 Tf
+0 0 Td
+(Pulse AI - Contacts:) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(  - Partnerships: partnerships@pulse-ai.com) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(  - Technical:    engineering@pulse-ai.com) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(  - Legal:        legal@pulse-ai.com) Tj
+ET
+endstream
+endobj
+
+8 0 obj
+<< /Length 2148 >>
+stream
+BT
+/F2 12 Tf
+50 740 Td
+(7. Open Action Items) Tj
+0 -20 Td
+/F1 10 Tf
+0 0 Td
+(The following items are BLOCKING the April 25 contract deadline:) Tj
+0 -18 Td
+/F1 10 Tf
+0 0 Td
+([URGENT] Marcus Veld to approve budget allocation by April 18.) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+([URGENT] Sophie Hartmann to complete security questionnaire by April 21.) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+([REQUIRED] Daniel Roos to review DPA draft - sent April 10, awaiting response.) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+([REQUIRED] Nexora IT to whitelist Nosana GPU egress IPs by April 23.) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+([NICE-TO-HAVE] Introductory call with 3 portfolio CTOs before pilot starts.) Tj
+0 -30 Td
+/F2 12 Tf
+0 0 Td
+(8. Risk Register) Tj
+0 -20 Td
+/F1 10 Tf
+0 0 Td
+(RISK-01 \(High\):    Legal review delay pushes pilot start past May 12.) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(  Mitigation: Parallel-track DPA and commercial terms review.) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(RISK-02 \(Medium\):  Nosana GPU network latency >2s during peak hours.) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(  Mitigation: Reserved node tier available at +EUR 800/month premium.) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(RISK-03 \(Medium\):  Google Workspace admin access delayed at portfolio firms.) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(  Mitigation: Pulse supports OAuth delegation - no IT admin required.) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(RISK-04 \(Low\):     Pilot users revert to manual email after training period.) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(  Mitigation: Dedicated onboarding session + 30-day check-in call.) Tj
+0 -30 Td
+/F2 12 Tf
+0 0 Td
+(9. Next Steps) Tj
+0 -20 Td
+/F1 10 Tf
+0 0 Td
+(1. Nexora to send signed Letter of Intent by April 18.) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(2. Pulse to deliver final SLA and DPA documents by April 16.) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(3. Joint kick-off call: April 22 at 10:00 AM CET \(invite sent separately\).) Tj
+0 -14 Td
+/F1 10 Tf
+0 0 Td
+(4. Contract signature meeting: April 25, Nexora Capital HQ, Amsterdam.) Tj
+0 -30 Td
+/F1 9 Tf
+0 0 Td
+(This document is confidential. Do not distribute outside Nexora Capital.) Tj
+0 -12 Td
+/F1 9 Tf
+0 0 Td
+(Pulse AI - Registered in Slovakia. VAT: SK2023456789.) Tj
+ET
+endstream
+endobj
+
+9 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+
+10 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+
+xref
+0 11
+0000000000 65535 f 
+0000000009 00000 n 
+0000000059 00000 n 
+0000000129 00000 n 
+0000000270 00000 n 
+0000000411 00000 n 
+0000000552 00000 n 
+0000002787 00000 n 
+0000004855 00000 n 
+0000007056 00000 n 
+0000007127 00000 n 
+trailer
+<< /Size 11 /Root 1 0 R >>
+startxref
+7204
+%%EOF

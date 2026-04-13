@@ -123,12 +123,17 @@ export async function classifyEmail(
     };
   }
 
+  // Sanitize email-sourced fields before injecting into LLM prompt.
+  const safeFrom    = msg.from.replace(/\r/g, "").slice(0, 100);
+  const safeSubject = msg.subject.replace(/\r/g, "").slice(0, 200);
+  const safeSnippet = msg.snippet.replace(/\r/g, "").slice(0, 300);
+
   const prompt = `${CLASSIFY_SYSTEM}
 
 Email to classify:
-From: ${msg.from}
-Subject: ${msg.subject}
-Preview: ${msg.snippet.slice(0, 300)}`;
+From: ${safeFrom}
+Subject: ${safeSubject}
+Preview: ${safeSnippet}`;
 
   let raw = "";
   try {

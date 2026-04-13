@@ -106,7 +106,12 @@ async function callChatCompletions(
     choices: Array<{ message: { content: string } }>;
   };
 
-  const result = data.choices[0]?.message?.content ?? "";
+  const result = data.choices[0]?.message?.content;
+  if (!result) {
+    throw new Error(
+      `[Pulse] Empty response from model=${modelName} (choices=${data.choices.length})`
+    );
+  }
 
   // Track every successful inference: count, latency, and response length for the GPU panel.
   recordLlmCall(Date.now() - requestStart, result.length);

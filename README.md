@@ -25,10 +25,15 @@ Pulse runs on a Nosana GPU node, processes your Gmail and Google Calendar on a s
 | **Approval Queue** | Every proposed action sits in queue until you explicitly approve it. Email drafts, calendar reschedules, follow-up reminders — nothing executes automatically. |
 | **Calendar Conflict Detection** | Finds overlapping events. Proposes a resolution. You pick which one moves. |
 | **Real-Time Web Search** | `WebSearchProvider` injects live web data into LLM context *before* generation. Only activates when you explicitly ask to search — e.g. "search for X" or "look up Y online". Routes weather to wttr.in, general queries to DuckDuckGo. |
-| **PDF Document Upload** | Attach any PDF in the chat. Pulse extracts the text server-side, runs a structured LLM analysis (summary, action items, deadlines, risks), and injects doc context into follow-up questions. Say "send the summary to x@y.com" — an LLM intent classifier detects the request and drafts the email automatically. |
+| **Smart Reply Suggestions** | Three LLM-generated reply pills appear on every email card. One click pre-fills the draft drawer — then edit and send. Keyword fallback works even when LLM is unavailable. |
+| **Pulse Score** | 0–100 inbox health score rendered as an SVG ring in the sidebar. Formula: decisiveness × 40 + queue clarity × 35 + commitment reliability × 25. Green above 70, amber 40–70, red below 40. |
+| **PDF Upload + Attachment** | Attach any PDF in the chat. Pulse extracts the text server-side, runs a structured LLM analysis (summary, action items, deadlines, risks), and injects doc context into follow-up questions. Say "send the summary to x@y.com" — an LLM intent classifier detects the request and drafts the email automatically. |
+| **Draft Style Memory** | The last 10 emails you actually sent are stored in memory. `/draft-assist` injects them as style examples — over time Pulse learns to write drafts that sound like you. |
+| **Calendar Q&A** | Ask "what's on my calendar this week?" — Pulse fetches real events via the `/pulse/calendar-context` route and injects them into the LLM prompt before generation. No hallucinated schedules. |
+| **Google OAuth Relay** | A static relay on GitHub Pages (`py-tr.github.io/agent-challenge/oauth-relay.html`) handles the OAuth redirect so any Pulse deployment (local or Nosana) can use a single registered redirect URI. |
 | **Morning Briefing + Voice** | On startup, Pulse posts a prioritized briefing of pending queue items. Hit "Listen" to hear it read aloud via the Web Speech API. |
 | **Follow-Up Detection** | Scans your SENT folder for emails with no reply in 3+ days. Creates follow_up queue items so nothing slips through. |
-| **Meeting Prep** | `"prepare me for the Q2 review"` — Pulse finds the event, pulls recent email threads with attendees, and generates a 5-8 bullet prep brief. |
+| **Meeting Prep** | `"prepare me for the Q2 review"` — Pulse finds the event, pulls recent email threads with attendees, and generates a 5-8 bullet prep brief. Uses real calendar data — not hallucinated. |
 | **AI Email Summaries** | Every email draft card auto-fetches a 1-2 sentence AI summary. No clicking into the thread — the key ask is surfaced immediately. |
 | **Analytics** | 7-day bar chart (approved vs rejected), per-type approval rates, and summary cards. Visualizes your decision patterns over time. |
 | **Focus Mode** | One item at a time, full-screen. Keyboard-friendly: approve / reject / dismiss. Zero distraction when inbox is overwhelming. |
@@ -72,10 +77,10 @@ src/pulse/
 
 **Plugin registration highlights:**
 
-- **5 Services** — background processing, MCP clients, morning briefing, evening summary
-- **3 Providers** — queue state, decision history, and live web data injected into every prompt
+- **5 Services** — `GmailMcpService`, `CalendarMcpService`, `PulseBackgroundService`, `MorningBriefingService`, `DailySummaryService`
+- **3 Providers** — `ActionQueueProvider`, `DecisionHistoryProvider`, `WebSearchProvider` — queue state, decision history, and live web data injected into every prompt
 - **2 Evaluators** — `SlibGuardEvaluator` (alwaysRun: true, commitment detection) + `WeatherContextEvaluator` (caches weather data for follow-up questions without re-searching)
-- **6 Actions** — email processing, conflict detection, follow-up detection, meeting prep, web search, calendar event creation
+- **6 Actions** — `ProcessEmailsAction`, `DetectConflictsAction`, `DetectFollowUpsAction`, `MeetingPrepAction`, `WebSearchAction`, `CreateCalendarEventAction`
 - **REST Routes** — full CRUD API for the React dashboard, plus direct LLM endpoints (`/pulse/draft-assist`, `/pulse/classify-intent`, `/pulse/upload`) that bypass ElizaOS session overhead for latency-sensitive operations
 - **Custom model handler** — `priority: 1` overrides `plugin-openai` to POST directly to `/v1/chat/completions`, bypassing `@ai-sdk/openai`'s Responses API default (which Nosana nodes don't support)
 
@@ -151,6 +156,8 @@ pnpm dev:hot
 pnpm dev
 ```
 
+Tip: add `PULSE_SEED_ON_START=true` to `.env` to auto-populate demo data on the first boot so the dashboard isn't empty.
+
 Open `http://localhost:5173` — the dashboard connects automatically.
 
 ---
@@ -169,7 +176,8 @@ Open `http://localhost:5173` — the dashboard connects automatically.
 | `PULSE_PUBLIC_URL` | No | Public base URL for OAuth redirect (e.g. `https://your-node.nos.ci`) |
 | `SERVER_PORT` | No | Backend port (default: `3000`) |
 | `PULSE_JOB_TYPE` | No | `morning` or `evening` — controls which processing mode runs |
-| `PULSE_SEED_ON_START` | No | `true` to auto-seed demo data on first boot |
+| `PULSE_SEED_ON_START` | No | `true` to auto-seed demo data on first boot (safe to leave on) |
+| `PULSE_PUBLIC_URL` | No | Public base URL for OAuth redirect (e.g. `https://your-node.nos.ci`) — overrides GitHub Pages relay |
 | `EMBEDDING_PROVIDER` | No | Set to `none` — embeddings not used |
 
 ### Google Authentication
@@ -217,15 +225,17 @@ The frontend is compiled into `/srv/pulse-frontend/` at build time and served as
 pnpm test
 ```
 
-47 tests across 6 files — all using in-memory PGLite, no external dependencies, no mocked database:
+92 tests across 8 files — all using in-memory PGLite, no external dependencies, no mocked database:
 
 ```
-src/pulse/tests/slibGuard.test.ts        18 tests  commitment extraction + deadline timing
-src/pulse/tests/actionQueue.test.ts       8 tests  approve/reject + status persistence
-src/pulse/tests/emailClassifier.test.ts   6 tests  LLM categorization + priority assignment
-src/pulse/tests/conflictDetector.test.ts  7 tests  overlap detection + resolution proposals
-src/pulse/tests/providers.test.ts         6 tests  provider output format + context injection
-src/pulse/tests/persistence.test.ts       2 tests  DB migrations + CRUD round-trips
+src/pulse/tests/slibGuard.test.ts         18 tests  commitment extraction + deadline timing
+src/pulse/tests/actionQueue.test.ts        8 tests  approve/reject + status persistence
+src/pulse/tests/emailClassifier.test.ts    6 tests  LLM categorization + priority assignment
+src/pulse/tests/conflictDetector.test.ts   7 tests  overlap detection + resolution proposals
+src/pulse/tests/providers.test.ts          6 tests  provider output format + context injection
+src/pulse/tests/persistence.test.ts        2 tests  DB migrations + CRUD round-trips
+src/pulse/tests/routeHelpers.test.ts      24 tests  sanitizeForPrompt, isValidEmail, recordSentDraft
+src/pulse/tests/nosanaMetrics.test.ts     21 tests  inference counter, EMA latency, formatUptime, security
 ```
 
 ---

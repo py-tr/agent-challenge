@@ -15,7 +15,15 @@
       "Bash(docker run:*)",
       "Bash(node -e ':*)",
       "WebFetch(domain:github.com)",
-      "Bash(pnpm build:*)"
+      "Bash(pnpm build:*)",
+      "WebSearch",
+      "Bash(curl -s \"https://api.github.com/repos/nosana-ci/agent-challenge/forks?sort=newest&per_page=100\")",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/sands786/agent-challenge/main/characters/agent.character.json\")",
+      "Bash(curl -s \"https://api.github.com/repos/nosana-ci/agent-challenge/forks?sort=newest&per_page=50\")",
+      "Bash(curl -s \"https://api.github.com/repos/nosana-ci/agent-challenge/forks?sort=newest&per_page=50&page=2\")",
+      "Bash(npx tsc:*)"
     ]
   }
 }

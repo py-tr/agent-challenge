@@ -66,4 +66,9 @@ RUN mkdir -p /app/data
 
 EXPOSE 3000
 
+# Health check — Nosana and orchestrators use this to detect crashes.
+# /pulse/status is lightweight (no DB or API calls) and always responds.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:3000/pulse/status || exit 1
+
 CMD ["pnpm", "start"]
