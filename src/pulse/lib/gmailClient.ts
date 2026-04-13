@@ -334,32 +334,76 @@ async function fetchMessageMetadata(
 
 // ─── Send Email ───────────────────────────────────────────────────────────────
 
+export interface EmailAttachment {
+  filename: string;
+  /** Standard base64-encoded file content (not base64url). */
+  base64: string;
+  /** MIME type — defaults to application/octet-stream. */
+  mimeType?: string;
+}
+
 /**
  * Send an email via Gmail REST API.
  *
- * Builds a minimal RFC 2822 message with UTF-8 text/plain body, base64url-
- * encodes the whole thing, and POSTs it to messages.send.
+ * When `attachments` are supplied, builds a multipart/mixed message; otherwise
+ * builds a minimal text/plain message.
  *
  * @returns The Gmail message ID of the sent message.
  */
 export async function sendEmail(
   to: string,
   subject: string,
-  body: string
+  body: string,
+  attachments?: EmailAttachment[]
 ): Promise<string> {
   const token = await refreshAccessToken();
 
-  // RFC 2822 headers + blank line + body.
-  // Using quoted-printable encoding declaration keeps the headers spec-valid
-  // even though we send raw UTF-8; Gmail's API is lenient about this.
-  const raw =
-    `To: ${to}\r\n` +
-    `Subject: ${subject}\r\n` +
-    `MIME-Version: 1.0\r\n` +
-    `Content-Type: text/plain; charset=UTF-8\r\n` +
-    `Content-Transfer-Encoding: 8bit\r\n` +
-    `\r\n` +
-    body;
+  let raw: string;
+
+  if (attachments && attachments.length > 0) {
+    const boundary = `pulse_boundary_${Date.now()}`;
+    const parts: string[] = [
+      // Text body part
+      `--${boundary}\r\n` +
+      `Content-Type: text/plain; charset=UTF-8\r\n` +
+      `Content-Transfer-Encoding: 8bit\r\n` +
+      `\r\n` +
+      body,
+    ];
+
+    for (const att of attachments) {
+      const mime = att.mimeType ?? "application/octet-stream";
+      // Split base64 into 76-char lines per MIME spec
+      const b64Lines = att.base64.replace(/(.{76})/g, "$1\r\n").trimEnd();
+      parts.push(
+        `--${boundary}\r\n` +
+        `Content-Type: ${mime}; name="${att.filename}"\r\n` +
+        `Content-Transfer-Encoding: base64\r\n` +
+        `Content-Disposition: attachment; filename="${att.filename}"\r\n` +
+        `\r\n` +
+        b64Lines
+      );
+    }
+
+    raw =
+      `To: ${to}\r\n` +
+      `Subject: ${subject}\r\n` +
+      `MIME-Version: 1.0\r\n` +
+      `Content-Type: multipart/mixed; boundary="${boundary}"\r\n` +
+      `\r\n` +
+      parts.join("\r\n") +
+      `\r\n--${boundary}--`;
+  } else {
+    // RFC 2822 headers + blank line + body.
+    raw =
+      `To: ${to}\r\n` +
+      `Subject: ${subject}\r\n` +
+      `MIME-Version: 1.0\r\n` +
+      `Content-Type: text/plain; charset=UTF-8\r\n` +
+      `Content-Transfer-Encoding: 8bit\r\n` +
+      `\r\n` +
+      body;
+  }
 
   const encoded = Buffer.from(raw).toString("base64url");
 

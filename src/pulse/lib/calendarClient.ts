@@ -313,6 +313,26 @@ export async function updateEvent(
   };
 }
 
+export async function deleteEvent(
+  eventId: string,
+  calendarId = "primary"
+): Promise<void> {
+  const token = await refreshAccessToken();
+
+  const resp = await fetch(
+    `${GCAL_BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+
+  if (!resp.ok && resp.status !== 204 && resp.status !== 410) {
+    const text = await resp.text();
+    throw new Error(`Calendar delete HTTP ${resp.status}: ${text.slice(0, 200)}`);
+  }
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**

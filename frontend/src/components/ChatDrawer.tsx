@@ -25,6 +25,8 @@ interface ChatMessage {
    * Populated on the PDF analysis message so the user can act without typing.
    */
   docChips?: { docId: string; filename: string; text: string };
+  /** When set, renders a "Mark as resolved" button that approves the conflict item. */
+  resolveItemId?: string;
 }
 
 interface Props {
@@ -186,9 +188,11 @@ function ThinkingDots() {
 function MessageBubble({
   msg,
   onUseDraft,
+  onResolveConflict,
 }: {
   msg: ChatMessage;
   onUseDraft?: (body: string) => void;
+  onResolveConflict?: (itemId: string) => void;
 }) {
   const isUser = msg.role === "user";
   const bubbleClass = isUser
@@ -224,6 +228,15 @@ function MessageBubble({
         >
           <Check size={11} />
           Use this draft
+        </button>
+      )}
+      {onResolveConflict && msg.resolveItemId && (
+        <button
+          onClick={() => onResolveConflict(msg.resolveItemId!)}
+          className="mt-1.5 flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100 active:scale-95"
+        >
+          <Check size={11} />
+          Mark conflict as resolved
         </button>
       )}
     </div>
@@ -493,14 +506,17 @@ interface InlineEmailSendProps {
   onSent: (to: string) => void;
   onDiscard: () => void;
   userDisplayName?: string;
+  /** If set, shows an "Attach PDF" checkbox that sends the doc as an attachment. */
+  attachDoc?: { docId: string; filename: string } | null;
 }
 
-function InlineEmailSend({ draft, onSent, onDiscard, userDisplayName }: InlineEmailSendProps) {
+function InlineEmailSend({ draft, onSent, onDiscard, userDisplayName, attachDoc }: InlineEmailSendProps) {
   const [to, setTo]       = useState(draft.to);
   const [body, setBody]   = useState(draft.body);
   const [sending, setSending] = useState(false);
   const [sent, setSent]   = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [attachPdf, setAttachPdf] = useState(!!attachDoc);
 
   async function handleSend() {
     if (!to.trim()) { setError("Enter a recipient email"); return; }
@@ -514,7 +530,8 @@ function InlineEmailSend({ draft, onSent, onDiscard, userDisplayName }: InlineEm
           finalBody = finalBody.trimEnd() + "\n" + userDisplayName;
         }
       }
-      await pulseApi.sendDirect({ to: to.trim(), subject: draft.subject, body: finalBody });
+      const attachDocIds = attachPdf && attachDoc ? [attachDoc.docId] : undefined;
+      await pulseApi.sendDirect({ to: to.trim(), subject: draft.subject, body: finalBody, attachDocIds });
       setSent(true);
       setTimeout(() => onSent(to.trim()), 1200);
     } catch (e) {
@@ -566,6 +583,19 @@ function InlineEmailSend({ draft, onSent, onDiscard, userDisplayName }: InlineEm
         rows={6}
         className="w-full rounded border border-indigo-100 bg-white p-2 text-xs text-gray-800 focus:outline-none focus:border-indigo-300 resize-none mb-2"
       />
+
+      {attachDoc && (
+        <label className="mb-2 flex cursor-pointer items-center gap-2 rounded-lg border border-indigo-200 bg-white px-2.5 py-1.5 text-[11px] text-indigo-700 select-none">
+          <input
+            type="checkbox"
+            checked={attachPdf}
+            onChange={(e) => setAttachPdf(e.target.checked)}
+            className="accent-indigo-600"
+          />
+          <Paperclip size={10} />
+          <span className="truncate">Attach PDF: {attachDoc.filename}</span>
+        </label>
+      )}
 
       {error && <p className="mb-1.5 text-[10px] text-red-500">{error}</p>}
 
@@ -696,6 +726,7 @@ export function ChatDrawer({
   const [calendarOffer, setCalendarOffer] = useState<CalendarOffer | null>(null);
   const [attachedDoc, setAttachedDoc] = useState<{ docId: string; filename: string; text?: string } | null>(null);
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
+  const [attachPdfToEmail, setAttachPdfToEmail] = useState(false);
   const [inlineEmailDraft, setInlineEmailDraft] = useState<{ to: string; subject: string; body: string } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -899,7 +930,10 @@ export function ChatDrawer({
           body = body.trimEnd() + "\n" + userDisplayName;
         }
       }
-      await pulseApi.sendEmail({ ...draft, to, body });
+      const attachDocIds = attachPdfToEmail && attachedDocRef.current?.docId
+        ? [attachedDocRef.current.docId]
+        : undefined;
+      await pulseApi.sendEmail({ ...draft, to, body }, attachDocIds);
 
       // Show brief success overlay, then offer follow-up only when relevant
       setEmailSentSuccess(true);
@@ -1157,10 +1191,67 @@ export function ChatDrawer({
       }
 
       // ── Conflict resolution: intercept when chat opened from a conflict card ─
-      // If the user says anything that sounds like "reschedule X to Y time",
-      // call /pulse/resolve-conflict directly instead of letting ElizaOS hallucinate.
+      const DELETE_RE =
+        /\b(delete|remove|cancel|drop|ditch|decline)\b.{0,80}\b(it|event|meeting|1:1|one.on.one|sarah|review|briefing|call|sync|standup|standup)/i;
+      const DELETE_SIMPLE_RE =
+        /^(delete it|remove it|cancel it|drop it|yes delete|yes remove|delete (event a|event b)|remove (event a|event b))\.?$/i;
+
+      if (!draft && conflictContext && (DELETE_RE.test(trimmed) || DELETE_SIMPLE_RE.test(trimmed))) {
+        // Determine which event the user wants to delete based on their message
+        const msgLower = trimmed.toLowerCase();
+        const titleA = conflictContext.eventATitle.toLowerCase();
+        const titleB = conflictContext.eventBTitle.toLowerCase();
+
+        // Score each event: count how many words from the title appear in the message
+        const scoreTitle = (title: string) =>
+          title.split(/\s+/).filter((w) => w.length > 2 && msgLower.includes(w)).length;
+
+        const scoreA = scoreTitle(titleA);
+        const scoreB = scoreTitle(titleB);
+
+        // Pick the better match; if tied, default to eventB (the shorter/conflicting one)
+        const targetId    = scoreA > scoreB ? conflictContext.eventAId    : conflictContext.eventBId;
+        const targetTitle = scoreA > scoreB ? conflictContext.eventATitle : conflictContext.eventBTitle;
+
+        if (!targetId) {
+          setMessages((prev) => [...prev, {
+            role: "agent",
+            text: `I don't have the event ID for "${targetTitle}". You may need to delete it directly in Google Calendar.`,
+            ts: new Date(),
+          }]);
+          setIsLoading(false);
+          return;
+        }
+
+        try {
+          await pulseApi.deleteEvent({ eventId: targetId, title: targetTitle });
+          setMessages((prev) => [...prev, {
+            role: "agent",
+            text: `Done — "${targetTitle}" has been removed from your calendar.`,
+            ts: new Date(),
+            positive: true,
+          }]);
+          if (conflictContext.itemId) {
+            await pulseApi.approve(conflictContext.itemId).catch(() => {});
+          }
+          onQueueRefresh?.();
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "Unknown error";
+          setMessages((prev) => [...prev, {
+            role: "agent",
+            text: `Sorry, I couldn't delete "${targetTitle}": ${msg}`,
+            ts: new Date(),
+          }]);
+        } finally {
+          if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
+          abortRef.current = null;
+          setIsLoading(false);
+        }
+        return;
+      }
+
       const RESCHEDULE_RE =
-        /\b(reschedule|move|shift|change|push|bump|cancel|drop)\b.{0,120}\b(to\s+\d|at\s+\d|\d{1,2}:\d{2}|[ap]m|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}\s*[ap]m)/i;
+        /\b(reschedule|move|shift|change|push|bump)\b.{0,120}\b(to\s+\d|at\s+\d|\d{1,2}:\d{2}|[ap]m|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}\s*[ap]m)/i;
       const RESCHEDULE_SIMPLE_RE =
         /\b(reschedule|move it|shift it|change it|can you move|please move|please reschedule)\b/i;
 
@@ -1182,6 +1273,16 @@ export function ChatDrawer({
             ...prev,
             { role: "agent", text: result.text, ts: new Date(), positive: result.action === "rescheduled" },
           ]);
+          if (result.action === "rescheduled" && conflictContext.itemId) {
+            const itemId = conflictContext.itemId;
+            setMessages((prev) => [...prev, {
+              role: "agent",
+              text: `Check your calendar to confirm there are no other clashes, then mark the conflict as resolved.`,
+              ts: new Date(),
+              resolveItemId: itemId,
+            }]);
+            onQueueRefresh?.();
+          }
         } catch (e) {
           const message = e instanceof Error ? e.message : "Unknown error";
           const is404 = message.includes("404") || message.includes("Not Found");
@@ -1494,30 +1595,44 @@ export function ChatDrawer({
 
       {/* Draft mode: top Send Email action bar */}
       {inDraftMode && (
-        <div className="shrink-0 flex items-center justify-between border-b border-gray-100 bg-green-50/70 px-4 py-2">
-          <span className="text-[10px] text-gray-400">
-            Edit the draft · click Send when ready
-          </span>
-          <button
-            onClick={() => void sendEmailDraft()}
-            disabled={isSendingEmail || !currentDraftBody.trim()}
-            className="flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-40 active:scale-95"
-          >
-            {isSendingEmail ? (
-              <span className="inline-flex items-center gap-0.5">
-                {[0, 1, 2].map((i) => (
-                  <span
-                    key={i}
-                    className="h-1 w-1 rounded-full bg-white animate-bounce"
-                    style={{ animationDelay: `${i * 150}ms` }}
-                  />
-                ))}
-              </span>
-            ) : (
-              <Send size={11} />
-            )}
-            Send Email
-          </button>
+        <div className="shrink-0 flex flex-col border-b border-gray-100 bg-green-50/70 px-4 py-2 gap-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-gray-400">
+              Edit the draft · click Send when ready
+            </span>
+            <button
+              onClick={() => void sendEmailDraft()}
+              disabled={isSendingEmail || !currentDraftBody.trim()}
+              className="flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-40 active:scale-95"
+            >
+              {isSendingEmail ? (
+                <span className="inline-flex items-center gap-0.5">
+                  {[0, 1, 2].map((i) => (
+                    <span
+                      key={i}
+                      className="h-1 w-1 rounded-full bg-white animate-bounce"
+                      style={{ animationDelay: `${i * 150}ms` }}
+                    />
+                  ))}
+                </span>
+              ) : (
+                <Send size={11} />
+              )}
+              Send Email
+            </button>
+          </div>
+          {attachedDoc && (
+            <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-gray-500 select-none">
+              <input
+                type="checkbox"
+                checked={attachPdfToEmail}
+                onChange={(e) => setAttachPdfToEmail(e.target.checked)}
+                className="accent-green-600"
+              />
+              <Paperclip size={10} />
+              <span className="truncate">Attach PDF: {attachedDoc.filename}</span>
+            </label>
+          )}
         </div>
       )}
 
@@ -1577,6 +1692,10 @@ export function ChatDrawer({
                 <MessageBubble
                   msg={msg}
                   onUseDraft={inDraftMode ? handleUseDraft : undefined}
+                  onResolveConflict={conflictContext ? async (itemId) => {
+                    await pulseApi.approve(itemId).catch(() => {});
+                    onQueueRefresh?.();
+                  } : undefined}
                 />
                 {msg.docChips && !inlineEmailDraft && (
                   <DocActionChips
@@ -1618,6 +1737,7 @@ export function ChatDrawer({
               <InlineEmailSend
                 draft={inlineEmailDraft}
                 userDisplayName={userDisplayName}
+                attachDoc={attachedDoc}
                 onSent={(to) => {
                   setInlineEmailDraft(null);
                   setMessages((prev) => [

@@ -167,16 +167,17 @@ export const pulseApi = {
       { method: "POST" }
     ),
 
-  sendEmail: (draft: EmailDraftContext) =>
+  sendEmail: (draft: EmailDraftContext, attachDocIds?: string[]) =>
     request<{ success: boolean; messageId: string }>(
       `/pulse/send-email`,
       {
         method: "POST",
         body: JSON.stringify({
-          to:      draft.to,
-          subject: draft.subject,
-          body:    draft.body,
-          itemId:  draft.itemId,
+          to:           draft.to,
+          subject:      draft.subject,
+          body:         draft.body,
+          itemId:       draft.itemId,
+          attachDocIds: attachDocIds?.length ? attachDocIds : undefined,
         }),
       }
     ),
@@ -245,6 +246,12 @@ export const pulseApi = {
       { method: "POST", body: JSON.stringify(params) }
     ),
 
+  deleteEvent: (params: { eventId: string; title?: string }) =>
+    request<{ success: boolean; eventId: string; title: string }>(
+      `/pulse/delete-event`,
+      { method: "POST", body: JSON.stringify(params) }
+    ),
+
   dismiss: (id: string) =>
     request<{ success: boolean; id: string; status: string }>(
       `/pulse/dismiss/${id}`,
@@ -255,7 +262,7 @@ export const pulseApi = {
    * Upload a PDF file for text extraction and LLM summarization.
    * Returns a docId the caller can attach to subsequent chat messages.
    */
-  sendDirect: (params: { to: string; subject: string; body: string }) =>
+  sendDirect: (params: { to: string; subject: string; body: string; attachDocIds?: string[] }) =>
     request<{ success: boolean; messageId: string }>(
       "/pulse/send-direct",
       { method: "POST", body: JSON.stringify(params) }

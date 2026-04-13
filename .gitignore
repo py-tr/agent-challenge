@@ -91,6 +91,7 @@ yarn.lock
 pnpm-lock.yaml
 bun.lockb
 /.eliza/.elizadb
+/.eliza/pulse-auth.json
 /dist
 /dist-frontend
 
@@ -103,3 +104,4 @@ CLAUDE.md
 scripts/seed-gmail.ts
 # Nosana confidential job definitions — contain Google OAuth credentials, never commit
 nos_job_def/*_confidential.json
+pulse-auth.json

@@ -17,10 +17,20 @@ pnpm-debug.log*
 .env.*.local
 .env.*
 
+# Runtime data — created at runtime, not needed at build time
+.eliza/
+
+# Nosana confidential job definitions
+nos_job_def/
+
 # Build output
 .mastra/
 dist/
+dist-frontend/
 build/
+
+# Claude Code
+.claude/
 
 # IDE
 .vscode/
@@ -51,3 +61,6 @@ coverage/
 .nyc_output/
 *.test.js
 *.spec.js
+
+# Scripts not needed in image
+scripts/

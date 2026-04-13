@@ -48,7 +48,7 @@ import type { ActionItem } from "../types.js";
 import { GmailMcpService } from "../services/GmailMcpService.js";
 import { CalendarMcpService } from "../services/CalendarMcpService.js";
 import { MorningBriefingService } from "../services/MorningBriefingService.js";
-import { updateEvent, listEvents } from "../lib/calendarClient.js";
+import { updateEvent, listEvents, deleteEvent } from "../lib/calendarClient.js";
 
 /** Display name used in outgoing email signatures. Configurable via env. */
 const USER_DISPLAY_NAME =
@@ -59,7 +59,7 @@ const USER_DISPLAY_NAME =
 // ─── In-memory document store ────────────────────────────────────────────────
 // Uploaded PDFs are stored for the lifetime of the server process.
 // docId → { filename, text (first 8000 chars), pageCount, summary }
-interface DocEntry { filename: string; text: string; pageCount: number; summary: string }
+interface DocEntry { filename: string; text: string; pageCount: number; summary: string; base64?: string }
 const docStore = new Map<string, DocEntry>();
 
 // ─── Frontend static-file serving ────────────────────────────────────────────
@@ -664,6 +664,8 @@ export const pulseRoutes: Route[] = [
           subject?: string;
           body?: string;
           itemId?: string;
+          /** Optional list of docIds to attach. base64 is resolved from docStore. */
+          attachDocIds?: string[];
         } | undefined;
 
         const to       = body?.to?.trim();
@@ -692,7 +694,13 @@ export const pulseRoutes: Route[] = [
           return;
         }
 
-        const messageId = await gmailSvc.sendEmail(to, subject, emailBody);
+        // Resolve any PDF attachments from the in-memory doc store.
+        const attachments = (body?.attachDocIds ?? [])
+          .map((id) => docStore.get(id))
+          .filter((d): d is DocEntry & { base64: string } => d !== undefined && d.base64 !== undefined)
+          .map((d) => ({ filename: d.filename, base64: d.base64, mimeType: "application/pdf" }));
+
+        const messageId = await gmailSvc.sendEmail(to, subject, emailBody, attachments.length ? attachments : undefined);
 
         await setActionItemStatus(db, itemId, "approved");
         await insertDecision(db, {
@@ -1162,6 +1170,25 @@ export const pulseRoutes: Route[] = [
     },
   },
 
+  // ── POST /pulse/delete-event ─────────────────────────────────────────────
+  {
+    type: "POST" as const,
+    path: "/delete-event",
+    handler: async (req: RouteRequest, res: RouteResponse, _runtime: IAgentRuntime) => {
+      const { eventId, title } = (req.body ?? {}) as { eventId?: string; title?: string };
+      if (!eventId) { err(res, "eventId is required"); return; }
+      try {
+        await deleteEvent(eventId);
+        console.log(`[Pulse:Routes] Deleted calendar event: ${title ?? eventId}`);
+        ok(res, { success: true, eventId, title: title ?? eventId });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[Pulse:Routes] POST /pulse/delete-event: ${msg}`);
+        err(res, msg);
+      }
+    },
+  },
+
   // ── POST /pulse/suggest-replies ───────────────────────────────────────────
   // Generates 3 short reply suggestions via LLM for a given email context.
   // Falls back to keyword-based suggestions if the LLM fails or times out.
@@ -1261,9 +1288,15 @@ export const pulseRoutes: Route[] = [
         if (extracted.targetTime && chosenId && hasIds) {
           const targetDate = date ?? (eventAStart?.slice(0, 10) ?? new Date().toISOString().slice(0, 10));
           const newStart = `${targetDate}T${extracted.targetTime}:00`;
-          const newEndMs = new Date(newStart).getTime() + durationMinutes * 60_000;
-          const newEnd   = new Date(newEndMs).toISOString().replace(/\.\d{3}Z$/, "");
-          const tz       = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+          // Build end time with pure arithmetic — never use toISOString() which converts to UTC.
+          const [startH, startM] = extracted.targetTime.split(":").map(Number);
+          const endTotalMin = startH * 60 + startM + durationMinutes;
+          const endH = Math.floor(endTotalMin / 60) % 24;
+          const endM = endTotalMin % 60;
+          const newEnd = `${targetDate}T${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}:00`;
+
+          const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
           const updated = await updateEvent(chosenId, { start: newStart, end: newEnd, timeZone: tz });
 
@@ -1272,11 +1305,24 @@ export const pulseRoutes: Route[] = [
             hour: "numeric", minute: "2-digit",
           });
 
+          // Check if the new time still overlaps with the OTHER event.
+          const otherStart = extracted.targetEvent === "A" ? eventBStart : eventAStart;
+          const otherEnd   = extracted.targetEvent === "A" ? eventBEnd   : eventAEnd;
+          const newStartMs = new Date(newStart).getTime();
+          const newEndMs   = new Date(newEnd).getTime();
+          const stillConflicts = otherStart && otherEnd
+            ? newStartMs < new Date(otherEnd).getTime() && newEndMs > new Date(otherStart).getTime()
+            : false;
+
+          const responseText = stillConflicts
+            ? `**${updated.title}** moved to **${readable}**, but it still overlaps with the other event. Please choose a different time.`
+            : `Done! **${updated.title}** moved to **${readable}**. The conflict is resolved — mark it as resolved to dismiss it from your queue.`;
+
           ok(res, {
-            action:      "rescheduled",
-            text:        `Done! **${updated.title}** moved to **${readable}**. The conflict is resolved — approve the item to dismiss it from your queue.`,
-            newStart:    updated.start,
-            eventId:     updated.id,
+            action:   stillConflicts ? "suggestions" : "rescheduled",
+            text:     responseText,
+            newStart: updated.start,
+            eventId:  updated.id,
           });
           return;
         }
@@ -1335,14 +1381,14 @@ export const pulseRoutes: Route[] = [
   // ── POST /pulse/send-direct ──────────────────────────────────────────────
   // Send an email without requiring an existing action item in the queue.
   // Used for document-summary emails drafted inline from chat.
-  // Body: { to: string, subject: string, body: string }
+  // Body: { to: string, subject: string, body: string, attachDocIds?: string[] }
   {
     type: "POST" as const,
     path: "/send-direct",
     handler: async (req: RouteRequest, res: RouteResponse, runtime: IAgentRuntime) => {
       try {
-        const { to, subject, body: emailBody } =
-          (req.body as { to?: string; subject?: string; body?: string }) ?? {};
+        const { to, subject, body: emailBody, attachDocIds } =
+          (req.body as { to?: string; subject?: string; body?: string; attachDocIds?: string[] }) ?? {};
 
         if (!to?.trim() || !subject?.trim() || !emailBody?.trim()) {
           err(res, "to, subject, and body are required", 400);
@@ -1358,7 +1404,12 @@ export const pulseRoutes: Route[] = [
           return;
         }
 
-        const messageId = await gmailSvc.sendEmail(to.trim(), subject.trim(), emailBody.trim());
+        const attachments = (attachDocIds ?? [])
+          .map((id) => docStore.get(id))
+          .filter((d): d is DocEntry & { base64: string } => d !== undefined && d.base64 !== undefined)
+          .map((d) => ({ filename: d.filename, base64: d.base64, mimeType: "application/pdf" }));
+
+        const messageId = await gmailSvc.sendEmail(to.trim(), subject.trim(), emailBody.trim(), attachments.length ? attachments : undefined);
         console.log(`[Pulse:Routes] send-direct → ${to}, messageId=${messageId}`);
         ok(res, { success: true, messageId });
       } catch (e) {
@@ -1457,7 +1508,7 @@ export const pulseRoutes: Route[] = [
         }
 
         const docId = crypto.randomUUID();
-        docStore.set(docId, { filename, text: textForStore, pageCount, summary });
+        docStore.set(docId, { filename, text: textForStore, pageCount, summary, base64: data });
 
         console.log(`[Pulse:Routes] PDF uploaded: ${filename} (${pageCount}p, ${pdfText.length} chars) → docId=${docId}`);
         ok(res, { docId, filename, summary, analysis, pageCount, text: textForStore.slice(0, 4_000) });
@@ -1576,7 +1627,7 @@ export const pulseRoutes: Route[] = [
       if (error || !code) {
         console.error(`[Pulse:Auth] OAuth error: ${error ?? "no code"}`);
         (res as unknown as { redirect: (url: string) => void })
-          .redirect("/?auth=error");
+          .redirect("/pulse/dashboard?auth=error");
         return;
       }
 
@@ -1615,12 +1666,12 @@ export const pulseRoutes: Route[] = [
         console.log("[Pulse:Auth] Refresh token saved to .eliza/pulse-auth.json");
 
         (res as unknown as { redirect: (url: string) => void })
-          .redirect("/?auth=success");
+          .redirect("/pulse/dashboard?auth=success");
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         console.error(`[Pulse:Auth] Callback error: ${msg}`);
         (res as unknown as { redirect: (url: string) => void })
-          .redirect(`/?auth=error&reason=${encodeURIComponent(msg)}`);
+          .redirect(`/pulse/dashboard?auth=error&reason=${encodeURIComponent(msg)}`);
       }
     },
   },

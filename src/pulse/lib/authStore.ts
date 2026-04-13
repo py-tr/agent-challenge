@@ -52,5 +52,6 @@ export async function isGoogleAuthConfigured(): Promise<boolean> {
 
 /** Resolves the refresh token from env or stored file. Returns null if neither. */
 export async function resolveRefreshToken(): Promise<string | null> {
-  return process.env.GOOGLE_REFRESH_TOKEN ?? (await getStoredRefreshToken());
+  // Use || not ?? so that an empty-string env var falls through to the stored file.
+  return process.env.GOOGLE_REFRESH_TOKEN || (await getStoredRefreshToken());
 }

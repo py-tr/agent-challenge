@@ -497,14 +497,24 @@ function ConflictCard({
             Ask Pulse
           </button>
         ) : <div />}
-        <button
-          onClick={() => void onReject()}
-          disabled={busy}
-          className="btn-reject py-1.5 px-3.5 text-xs"
-        >
-          <X size={13} />
-          Reject
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => void onReject()}
+            disabled={busy}
+            className="btn-reject py-1.5 px-3.5 text-xs"
+          >
+            <X size={13} />
+            Reject
+          </button>
+          <button
+            onClick={() => void onApprove()}
+            disabled={busy}
+            className="btn-approve py-1.5 px-3.5 text-xs"
+          >
+            <Check size={13} />
+            Resolved
+          </button>
+        </div>
       </div>
     </article>
   );

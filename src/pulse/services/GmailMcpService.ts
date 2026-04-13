@@ -30,7 +30,7 @@ import {
   sendEmail as gmailSendEmail,
   HistoryExpiredError,
 } from "../lib/gmailClient.js";
-import type { GmailMessage } from "../lib/gmailClient.js";
+import type { GmailMessage, EmailAttachment } from "../lib/gmailClient.js";
 import {
   classifyEmail,
   type ClassificationResult,
@@ -191,8 +191,8 @@ export class GmailMcpService extends Service {
    * Delegates to gmailClient.sendEmail — exposed here so routes have a single
    * service reference rather than importing the raw client directly.
    */
-  async sendEmail(to: string, subject: string, body: string): Promise<string> {
-    return gmailSendEmail(to, subject, body);
+  async sendEmail(to: string, subject: string, body: string, attachments?: EmailAttachment[]): Promise<string> {
+    return gmailSendEmail(to, subject, body, attachments);
   }
 
   /**

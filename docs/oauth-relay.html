@@ -67,7 +67,7 @@
     if (error || !code) {
       const origin = state ? decodeOrigin(state) : null;
       if (origin) {
-        location.href = origin + "/?auth=error";
+        location.href = origin + "/pulse/dashboard?auth=error";
       } else {
         setStatus("Sign-in failed: " + (error || "no authorization code received."), true);
       }
