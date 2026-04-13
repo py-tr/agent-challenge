@@ -6,16 +6,20 @@
       "type": "container/run",
       "args": {
         "image": "pytrdev/pulse-agent:latest",
+        "gpu": true,
         "expose": 3000,
         "env": {
-          "OPENAI_API_KEY": "nosana",
-          "OPENAI_API_URL": "TODO: replace with your Nosana node endpoint URL (e.g. https://<node-id>.node.k8s.prd.nos.ci/v1)",
-          "OPENAI_SMALL_MODEL": "Qwen3.5-27B-AWQ-4bit",
-          "OPENAI_LARGE_MODEL": "Qwen3.5-27B-AWQ-4bit",
           "SERVER_PORT": "3000",
           "NODE_ENV": "production",
           "PULSE_SEED_ON_START": "true",
-          "EMBEDDING_PROVIDER": "none"
+          "EMBEDDING_PROVIDER": "none",
+          "OLLAMA_MODEL": "qwen2.5:14b",
+          "OLLAMA_BASE_URL": "http://localhost:11434/v1",
+          "OPENAI_API_KEY": "nosana",
+          "OPENAI_API_URL": "TODO: replace with your Nosana node endpoint URL (e.g. https://<node-id>.node.k8s.prd.nos.ci/v1)",
+          "OPENAI_SMALL_MODEL": "qwen2.5:14b",
+          "OPENAI_LARGE_MODEL": "qwen2.5:14b",
+          "SKIP_OLLAMA": "false"
         }
       }
     }

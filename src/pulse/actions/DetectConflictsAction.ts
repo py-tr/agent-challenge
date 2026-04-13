@@ -16,10 +16,7 @@
  */
 
 import type { Action, IAgentRuntime, Memory, State } from "@elizaos/core";
-import { CalendarMcpService } from "../services/CalendarMcpService.js";
-import { detectConflicts } from "../lib/conflictDetector.js";
-import { insertActionItem } from "../db/queries.js";
-import type { Db } from "../db/schema.js";
+import { PulseBackgroundService } from "../services/PulseBackgroundService.js";
 
 // ─── Trigger Detection ────────────────────────────────────────────────────────
 
@@ -91,128 +88,42 @@ export const detectConflictsAction: Action = {
     _options?: Record<string, unknown>,
     callback?: (response: { text: string }) => Promise<unknown>
   ) => {
-    // Step 1: Acknowledge
     if (callback) {
       await callback({ text: "Scanning your calendar for the next 14 days…" });
     }
 
     try {
-      // Step 2: Get CalendarMcpService
-      const calService = runtime.getService(
-        CalendarMcpService.serviceType
-      ) as CalendarMcpService | null;
+      const bgSvc = runtime.getService(
+        PulseBackgroundService.serviceType
+      ) as PulseBackgroundService | null;
 
-      if (!calService) {
-        const errMsg =
-          "Calendar service is not initialised. " +
-          "Ensure CalendarMcpService is registered in pulsePlugin.services.";
-        console.error(`[Pulse:DetectConflictsAction] ${errMsg}`);
+      if (!bgSvc) {
+        const errMsg = "Background service not initialised.";
         if (callback) await callback({ text: `⚠ ${errMsg}` });
         return { success: false, error: errMsg };
       }
 
-      // Step 3: Fetch events
-      const events = await calService.getEvents(14);
+      // Delegate to stageConflicts() via runProcessingCycle() — dedup is handled there.
+      const result = await bgSvc.runProcessingCycle();
+      const { conflicts } = result;
 
-      if (events.length === 0) {
-        const msg = "No calendar events found in the next 14 days.";
-        if (callback) await callback({ text: `✓ ${msg}` });
-        return { success: true, data: { events: 0, conflicts: 0 }, text: msg };
-      }
-
-      // Step 4: Detect conflicts
-      const conflicts = await detectConflicts(runtime, events);
-
-      if (conflicts.length === 0) {
-        const msg = `Scanned ${events.length} events — no conflicts found.`;
-        if (callback) await callback({ text: `✓ ${msg}` });
-        return {
-          success: true,
-          data: { events: events.length, conflicts: 0 },
-          text: msg,
-        };
-      }
-
-      // Step 5: Write to pulse_action_items
-      const db = runtime.db as unknown as Db;
-      let inserted = 0;
-      const errors: string[] = [];
-
-      for (const conflict of conflicts) {
-        const { eventA, eventB, overlapMinutes, suggestion } = conflict;
-
-        const dateStr = eventA.start.slice(0, 10);
-        const dateLabel = new Date(dateStr + "T12:00:00").toLocaleDateString(
-          "en-US",
-          { weekday: "short", month: "short", day: "numeric" }
-        );
-
-        const title = `Conflict: "${eventA.title}" ↔ "${eventB.title}" — ${dateLabel}`;
-
-        const body =
-          `**${eventA.title}** (${eventA.start.slice(11, 16)}–${eventA.end.slice(11, 16)}) ` +
-          `overlaps with **${eventB.title}** (${eventB.start.slice(11, 16)}–${eventB.end.slice(11, 16)}) ` +
-          `by ${overlapMinutes} minute${overlapMinutes === 1 ? "" : "s"}.\n\n` +
-          `**Suggested resolution:** ${suggestion}\n\n` +
-          `Approve to acknowledge this conflict is handled, or Reject to dismiss it.`;
-
-        try {
-          await insertActionItem(db, {
-            type: "conflict_resolution",
-            title,
-            body,
-            metadata: {
-              eventAId:    eventA.id,
-              eventBId:    eventB.id,
-              eventATitle: eventA.title,
-              eventBTitle: eventB.title,
-              eventAStart: eventA.start,
-              eventAEnd:   eventA.end,
-              eventBStart: eventB.start,
-              eventBEnd:   eventB.end,
-              overlapMinutes,
-              date: dateStr,
-            },
-            priority: 1, // Highest — surfaces above all other items
-          });
-          inserted++;
-        } catch (err) {
-          const errStr = err instanceof Error ? err.message : String(err);
-          console.error(
-            `[Pulse:DetectConflictsAction] Failed to insert conflict item: ${errStr}`
-          );
-          errors.push(errStr);
-        }
-      }
-
-      // Step 6: Summary
-      const conflictWord = inserted === 1 ? "conflict" : "conflicts";
-      const replyText =
-        `✓ Scanned ${events.length} events. Found ${inserted} ${conflictWord} — added to your approval queue.`;
+      const replyText = conflicts.error
+        ? `Calendar scan failed: ${conflicts.error}`
+        : conflicts.inserted === 0
+          ? `✓ Scanned ${conflicts.processed} event pair(s) — no new conflicts found.`
+          : `✓ Scanned ${conflicts.processed} event(s). Found ${conflicts.inserted} new conflict(s) — added to your approval queue.`;
 
       if (callback) await callback({ text: replyText });
 
-      console.log(
-        `[Pulse:DetectConflictsAction] Done — events=${events.length}, ` +
-        `conflicts=${conflicts.length}, inserted=${inserted}, errors=${errors.length}`
-      );
-
       return {
-        success: errors.length === 0,
-        data: {
-          events: events.length,
-          conflicts: conflicts.length,
-          inserted,
-          errors: errors.length > 0 ? errors : undefined,
-        },
+        success: !conflicts.error,
+        data: result as unknown as Record<string, unknown>,
         text: replyText,
       };
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error(`[Pulse:DetectConflictsAction] Unexpected error: ${errMsg}`);
-      if (callback) {
-        await callback({ text: `Calendar scan failed: ${errMsg}` });
-      }
+      if (callback) await callback({ text: `Calendar scan failed: ${errMsg}` });
       return { success: false, error: errMsg };
     }
   },

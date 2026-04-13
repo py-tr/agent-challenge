@@ -12,6 +12,7 @@
 import { ModelType } from "@elizaos/core";
 import type { IAgentRuntime } from "@elizaos/core";
 import { eventsOverlap, type CalendarEvent } from "./calendarClient.js";
+import { useModelWithFallback } from "./llmFallback.js";
 
 // ─── Public Types ─────────────────────────────────────────────────────────────
 
@@ -117,7 +118,7 @@ async function llmSuggestion(
     `Event B: ${fmt(b)}\n\n` +
     `Reply with ONE sentence only. No preamble.`;
 
-  const raw = await runtime.useModel(ModelType.TEXT_SMALL, {
+  const raw = await useModelWithFallback(runtime, ModelType.TEXT_SMALL, {
     prompt,
     maxTokens: 80,
     temperature: 0.3,

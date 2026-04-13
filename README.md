@@ -69,6 +69,8 @@ src/pulse/
 │   └── CreateCalendarEventAction.ts # Action: create Google Calendar events via chat
 ├── routes/
 │   └── pulseRoutes.ts              # Routes: REST API (/pulse/queue, approve, reject, status)
+├── lib/
+│   └── llmFallback.ts              # Inference fallback: Ollama (primary) → Nosana endpoint
 └── db/
     ├── schema.ts                   # Drizzle ORM table definitions (PGLite)
     ├── migrations.ts               # IF NOT EXISTS migrations — safe on cold Nosana boot
@@ -118,12 +120,24 @@ Every successful LLM call increments a persistent counter via `nosanaMetrics.ts`
     "estimatedCostUsd": 0.0004,
     "uptimeMs": 86400000,
     "jobType": "morning",
-    "modelName": "Qwen3.5-27B-AWQ-4bit"
+    "modelName": "qwen2.5:14b"
   }
 }
 ```
 
-The sidebar GPU panel renders the model name, inference count, EMA latency, uptime, and job type. `avgLatencyMs` is an exponential moving average (α = 0.2) computed from wall-clock durations of each `/v1/chat/completions` call.
+The sidebar GPU panel renders the model name, inference count, average latency, uptime, and job type. `avgLatencyMs` is an exponential moving average (α = 0.2) computed from wall-clock durations of each inference call.
+
+### Local-First Inference (Ollama)
+
+Pulse runs a local Ollama instance inside the container as the **primary** inference backend, with the Nosana-hosted endpoint as a fallback.
+
+```
+Ollama (local, GPU-accelerated)  →  Nosana endpoint (fallback)
+```
+
+The fallback chain is implemented in `src/pulse/lib/llmFallback.ts` and wraps every `runtime.useModel()` call across the plugin.
+
+**`SKIP_OLLAMA=true`** — set this to skip Ollama entirely and route all inference directly to `OPENAI_API_URL`. Useful when deploying to a market where the model is already a required resource on every node, giving instant availability without a pull.
 
 ### Deployment
 
@@ -131,12 +145,17 @@ Two Nosana job definitions in `nos_job_def/` — morning (6am) and evening (9pm)
 
 ```bash
 nosana job post \
-  --file ./nos_job_def/nosana_morning_job.json \
-  --market nvidia-4090 \
+  --file ./nos_job_def/nosana_eliza_job_definition.json \
+  --market nvidia-4070 \
   --timeout 60
 ```
 
-Model: **Qwen3.5-27B-AWQ-4bit** running on Nosana GPU infrastructure.
+On first boot, the container starts Ollama, pulls `qwen2.5:14b` (~9GB), then launches the agent. The health check `start-period` is set to 300s to accommodate this. Subsequent starts on the same node are near-instant if the node has cached the model (24h cache lifetime per Nosana's caching policy).
+
+**Tip:** Check if your target market has `qwen2.5:14b` as a required resource — if it does, the pull is instant on any node in that market:
+```
+https://dashboard.k8s.prd.nos.ci/api/markets/<Market-Address>/required-resources
+```
 
 ---
 
@@ -175,24 +194,39 @@ Demo data is only inserted when the queue is empty, so it never overwrites real 
 
 ## Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `OPENAI_API_KEY` | Yes | `nosana` for Nosana nodes, or your OpenAI key |
-| `OPENAI_API_URL` | Yes | Nosana node endpoint, e.g. `https://<node>.nos.ci/v1` |
-| `OPENAI_SMALL_MODEL` | No | Model name (default: `Qwen3.5-27B-AWQ-4bit`) |
-| `OPENAI_LARGE_MODEL` | No | Model name (default: `Qwen3.5-27B-AWQ-4bit`) |
-| `GOOGLE_CLIENT_ID` | No | Google OAuth client ID — enables "Sign in with Google" button |
-| `GOOGLE_CLIENT_SECRET` | No | Google OAuth client secret |
-| `GOOGLE_REFRESH_TOKEN` | No | Long-lived refresh token — set directly to skip the OAuth flow |
-| `PULSE_PUBLIC_URL` | No | Public base URL for OAuth redirect (e.g. `https://your-node.nos.ci`) |
-| `SERVER_PORT` | No | Backend port (default: `3000`) |
-| `PULSE_JOB_TYPE` | No | `morning` or `evening` — logged in metrics, used by Nosana job definitions |
-| `PULSE_SEED_ON_START` | No | `true` = always seed demo data; `false` = never seed; unset = seed only when no Google credentials |
-| `EMBEDDING_PROVIDER` | No | Set to `none` — embeddings not required by Pulse |
+**Inference** (Ollama is primary; `OPENAI_*` used as fallback or when `SKIP_OLLAMA=true`)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OLLAMA_MODEL` | `qwen2.5:14b` | Model pulled and served by local Ollama |
+| `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Ollama API base URL |
+| `SKIP_OLLAMA` | `false` | Set `true` to skip Ollama and route all inference to `OPENAI_API_URL` |
+| `OPENAI_API_KEY` | — | Inference API key for fallback endpoint (`nosana` for Nosana nodes) |
+| `OPENAI_API_URL` | — | Fallback inference endpoint, e.g. `https://<node>.nos.ci/v1` |
+| `OPENAI_SMALL_MODEL` | `qwen2.5:14b` | Model name for fallback endpoint |
+| `OPENAI_LARGE_MODEL` | `qwen2.5:14b` | Model name for fallback endpoint |
+
+**Google / Auth**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GOOGLE_CLIENT_ID` | — | Google OAuth client ID — enables "Sign in with Google" button |
+| `GOOGLE_CLIENT_SECRET` | — | Google OAuth client secret |
+| `GOOGLE_REFRESH_TOKEN` | — | Long-lived refresh token — set directly to skip the OAuth flow |
+| `PULSE_PUBLIC_URL` | — | Public base URL for OAuth redirect (e.g. `https://your-node.nos.ci`) |
+
+**General**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SERVER_PORT` | `3000` | Backend port |
+| `PULSE_JOB_TYPE` | — | `morning` or `evening` — logged in metrics, used by Nosana job definitions |
+| `PULSE_SEED_ON_START` | — | `true` = always seed demo data; `false` = never seed; unset = seed only when no Google credentials |
+| `EMBEDDING_PROVIDER` | — | Set to `none` — embeddings not required by Pulse |
 
 ### Google Authentication
 
-Pulse supports three ways to connect Google:
+Pulse supports two ways to connect Google:
 
 1. **"Sign in with Google" button** — works on any deployment (local or Nosana) via a static OAuth relay hosted on GitHub Pages. Register **one** redirect URI in Google Cloud Console and it works everywhere:
    ```
@@ -200,9 +234,7 @@ Pulse supports three ways to connect Google:
    ```
    The relay receives the Google callback and forwards the auth code back to whichever Pulse instance started the flow (encoded in the OAuth `state` parameter).
 
-2. **Paste refresh token** — paste a refresh token directly into the setup banner. Useful when OAuth isn't configured. Token is saved to `.eliza/pulse-auth.json`.
-
-3. **`GOOGLE_REFRESH_TOKEN` env var** — set directly in `.env` or the Nosana job definition. Takes priority over the stored file.
+2. **`GOOGLE_REFRESH_TOKEN` env var** — set directly in `.env` or the Nosana job definition. Takes priority over the OAuth flow. Useful for headless/automated deployments.
 
 **One-time Google Cloud setup:**
 - Create an OAuth 2.0 Client ID at [console.cloud.google.com](https://console.cloud.google.com) → APIs & Services → Credentials
@@ -253,35 +285,39 @@ src/pulse/tests/nosanaMetrics.test.ts     21 tests  inference counter, EMA laten
 ## Architecture Diagram
 
 ```
-┌─────────────────────────── Nosana GPU Node ────────────────────────────┐
-│                                                                         │
-│  ┌─────────────────────────── ElizaOS Runtime ──────────────────────┐  │
-│  │                                                                   │  │
-│  │   Services              Providers              Evaluator          │  │
-│  │   ─────────             ─────────              ─────────          │  │
-│  │   PulseBackground  →    ActionQueue     →    SlibGuard            │  │
-│  │   GmailMcp         →    DecisionHistory       (alwaysRun)         │  │
-│  │   CalendarMcp      →    WebSearch                                 │  │
-│  │   MorningBriefing                                                 │  │
-│  │   DailySummary                                                    │  │
-│  │                                                                   │  │
-│  │   Actions                Routes                DB                 │  │
-│  │   ───────                ──────                ──                 │  │
-│  │   ProcessEmails          /pulse/queue          PGLite             │  │
-│  │   DetectConflicts        /pulse/approve        action_items       │  │
-│  │   DetectFollowUps        /pulse/reject         commitments        │  │
-│  │   MeetingPrep            /pulse/status         decisions          │  │
-│  │   WebSearch              /pulse/decisions                         │  │
-│  │   CreateCalendarEvent    /pulse/analytics                         │  │
-│  └────────────────────────────────────────────────────┬──────────────┘  │
-│                                                       │ :3000           │
-└───────────────────────────────────────────────────────┼─────────────────┘
-                                                        │
-                                               ┌────────▼────────┐
-                                               │  React + Vite   │
-                                               │  Dashboard      │
-                                               │  :5173 / :3000  │
-                                               └─────────────────┘
+┌──────────────────────────────── Nosana GPU Node ─────────────────────────────────┐
+│                                                                                   │
+│  ┌── Ollama :11434 ──────────────────┐                                           │
+│  │  qwen2.5:14b (GPU-accelerated)    │◄── llmFallback.ts (primary)               │
+│  └───────────────────────────────────┘                                           │
+│                                                                                   │
+│  ┌─────────────────────────── ElizaOS Runtime ───────────────────────────────┐   │
+│  │                                                                            │   │
+│  │   Services              Providers              Evaluators                  │   │
+│  │   ─────────             ─────────              ──────────                  │   │
+│  │   PulseBackground  →    ActionQueue     →    SlibGuard (alwaysRun)         │   │
+│  │   GmailMcp         →    DecisionHistory      WeatherContext                │   │
+│  │   CalendarMcp      →    WebSearch                                          │   │
+│  │   MorningBriefing                                                          │   │
+│  │   DailySummary                                                             │   │
+│  │                                                                            │   │
+│  │   Actions                Routes                DB                          │   │
+│  │   ───────                ──────                ──                          │   │
+│  │   ProcessEmails          /pulse/queue          PGLite                      │   │
+│  │   DetectConflicts        /pulse/approve        action_items                │   │
+│  │   DetectFollowUps        /pulse/reject         commitments                 │   │
+│  │   MeetingPrep            /pulse/status         decisions                   │   │
+│  │   WebSearch              /pulse/decisions                                  │   │
+│  │   CreateCalendarEvent    /pulse/analytics                                  │   │
+│  └────────────────────────────────────────────────────────────┬───────────────┘   │
+│                                                               │ :3000             │
+└───────────────────────────────────────────────────────────────┼───────────────────┘
+                                                                │
+                                                       ┌────────▼────────┐
+                                                       │  React + Vite   │
+                                                       │  Dashboard      │
+                                                       │  :5173 / :3000  │
+                                                       └─────────────────┘
 ```
 
 ---
@@ -296,6 +332,8 @@ src/pulse/tests/nosanaMetrics.test.ts     21 tests  inference counter, EMA laten
 
 **PGLite over PostgreSQL.** No external database. Schema managed with Drizzle ORM, `IF NOT EXISTS` migrations run on every boot. Works from a clean cold start on any Nosana node.
 
+**Ollama-first inference.** `llmFallback.ts` wraps every `runtime.useModel()` call. Ollama runs locally on the same GPU node, so inference is fast and fully under our control. The Nosana-hosted endpoint serves as a fallback — no code changes needed to switch between them.
+
 ---
 
-**Pulse · ElizaOS Plugin · Deployed on Nosana · Qwen3.5-27B**
+**Pulse · ElizaOS Plugin · Deployed on Nosana · qwen2.5:14b**

@@ -225,7 +225,15 @@ function UndoCard({
               </span>
             )}
           </div>
-          <span className="text-xs text-gray-400">{relativeTime(item.createdAt)}</span>
+          <div className="flex flex-col items-end gap-0.5">
+            {item.type === "email_draft" && item.metadata && formatEmailDate((item.metadata as Record<string, unknown>).date) && (
+              <span className="text-xs text-gray-400 flex items-center gap-1">
+                <Mail size={10} className="text-gray-300" />
+                received {formatEmailDate((item.metadata as Record<string, unknown>).date)}
+              </span>
+            )}
+            <span className="text-xs text-gray-300">added {relativeTime(item.createdAt)}</span>
+          </div>
         </div>
 
         <h3 className="mt-3 text-base font-semibold leading-snug text-gray-500 line-through decoration-1">
@@ -385,7 +393,15 @@ function ConflictCard({
             )}
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <span className="text-xs text-gray-400">{relativeTime(item.createdAt)}</span>
+            <div className="flex flex-col items-end gap-0.5">
+              {item.type === "email_draft" && item.metadata && formatEmailDate((item.metadata as Record<string, unknown>).date) && (
+                <span className="text-xs text-gray-400 flex items-center gap-1">
+                  <Mail size={10} className="text-gray-300" />
+                  received {formatEmailDate((item.metadata as Record<string, unknown>).date)}
+                </span>
+              )}
+              <span className="text-xs text-gray-300">added {relativeTime(item.createdAt)}</span>
+            </div>
             <button
               onClick={() => setExpanded((v) => !v)}
               className="rounded-md p-1 text-gray-300 hover:bg-gray-100 hover:text-gray-500 transition-colors"
@@ -676,7 +692,15 @@ function ItemCard({
             )}
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <span className="text-xs text-gray-400">{relativeTime(item.createdAt)}</span>
+            <div className="flex flex-col items-end gap-0.5">
+              {item.type === "email_draft" && item.metadata && formatEmailDate((item.metadata as Record<string, unknown>).date) && (
+                <span className="text-xs text-gray-400 flex items-center gap-1">
+                  <Mail size={10} className="text-gray-300" />
+                  received {formatEmailDate((item.metadata as Record<string, unknown>).date)}
+                </span>
+              )}
+              <span className="text-xs text-gray-300">added {relativeTime(item.createdAt)}</span>
+            </div>
             <button
               onClick={() => setExpanded((v) => !v)}
               className="rounded-md p-1 text-gray-300 hover:bg-gray-100 hover:text-gray-500 transition-colors"
@@ -1014,5 +1038,31 @@ function relativeTime(iso: string): string {
   const m = Math.floor(diff / 60_000);
   if (diff < 60_000) return "just now";
   if (m < 60) return `${m}m ago`;
-  return `${Math.floor(m / 60)}h ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
+
+/**
+ * Format an email received date from metadata.
+ * Gmail `date` field is typically an RFC 2822 string or Unix timestamp in ms.
+ * Returns a short human-readable label, e.g. "Mon 14 Apr, 09:32" or "2d ago".
+ */
+function formatEmailDate(raw: unknown): string | null {
+  if (!raw) return null;
+  let d: Date;
+  if (typeof raw === "number") {
+    d = new Date(raw > 1e12 ? raw : raw * 1000); // ms vs s
+  } else if (typeof raw === "string") {
+    d = new Date(raw);
+  } else {
+    return null;
+  }
+  if (isNaN(d.getTime())) return null;
+  const diff = Date.now() - d.getTime();
+  const days = Math.floor(diff / 86_400_000);
+  if (days >= 7) return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  if (days >= 1) return `${days}d ago`;
+  return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 }

@@ -36,6 +36,7 @@ import {
   setActionItemStatus,
   insertDecision,
   insertActionItem,
+  insertCommitment,
   getDecisions,
   countAllStatuses,
   countDecisions,
@@ -43,6 +44,11 @@ import {
   getCommitmentStats,
   getWeeklyDecisions,
 } from "../db/queries.js";
+import {
+  extractCommitments,
+  hasCommitmentPattern,
+  computeRemindAt,
+} from "../lib/commitmentParser.js";
 import type { Db } from "../db/schema.js";
 import type { ActionItem } from "../types.js";
 import { GmailMcpService } from "../services/GmailMcpService.js";
@@ -50,12 +56,133 @@ import { CalendarMcpService } from "../services/CalendarMcpService.js";
 import { PulseBackgroundService } from "../services/PulseBackgroundService.js";
 import { MorningBriefingService } from "../services/MorningBriefingService.js";
 import { updateEvent, listEvents, deleteEvent } from "../lib/calendarClient.js";
+import { useModelWithFallback } from "../lib/llmFallback.js";
 import {
   isValidEmail,
   sanitizeForPrompt,
   recordSentDraft as _recordSentDraft,
   type SentDraftEntry,
 } from "../lib/routeHelpers.js";
+
+// ─── Shared calendar helpers ──────────────────────────────────────────────────
+
+/**
+ * True if [startA, endA) and [startB, endB) overlap.
+ * Accepts any ISO 8601 string — uses Date.getTime() so timezone offsets
+ * are handled correctly (e.g. "T11:00:00+02:00" vs "T09:00:00Z" are equal).
+ */
+function eventsOverlap(startA: string, endA: string, startB: string, endB: string): boolean {
+  const sA = new Date(startA).getTime();
+  const eA = new Date(endA).getTime();
+  const sB = new Date(startB).getTime();
+  const eB = new Date(endB).getTime();
+  return sA < eB && eA > sB;
+}
+
+/**
+ * Pre-built date/time context string for LLM prompts.
+ * Provides today's date, weekday lookup, and common relative-time values so
+ * small models never have to do calendar arithmetic themselves.
+ */
+function buildLlmDateContext(now: Date = new Date()): string {
+  const pad  = (n: number) => String(n).padStart(2, "0");
+  const ymd  = (d: Date)   => d.toISOString().slice(0, 10);
+  const hm   = (d: Date)   => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const DAY  = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+  const todayIdx = now.getDay();
+
+  const nextDay = (target: number): Date => {
+    const d = new Date(now);
+    let delta = target - todayIdx;
+    if (delta <= 0) delta += 7;
+    d.setDate(d.getDate() + delta);
+    return d;
+  };
+
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  return [
+    `=== DATE/TIME REFERENCE (use these exact values — do NOT compute yourself) ===`,
+    `today    = ${ymd(now)}  (${DAY[todayIdx]})`,
+    `tomorrow = ${ymd(tomorrow)}`,
+    `--- Next occurrence of each weekday ---`,
+    ...DAY.map((name, i) => `${name.padEnd(12)} = ${ymd(nextDay(i))}`),
+    `--- Time-of-day defaults ---`,
+    `morning = 09:00  noon/lunch = 12:00  afternoon = 14:00  evening = 18:00`,
+    `=== END REFERENCE ===`,
+  ].join("\n");
+}
+
+/**
+ * Scan a just-sent email body for commitment language.
+ * If found, persist each commitment and queue a slib_reminder action item.
+ * Fire-and-forget — never throws, never blocks the send response.
+ */
+function scanSentEmailForCommitments(
+  runtime: IAgentRuntime,
+  db: Db,
+  subject: string,
+  body: string
+): void {
+  if (!hasCommitmentPattern(body)) return;
+
+  void (async () => {
+    try {
+      const commitments = await extractCommitments(runtime, body);
+      for (const c of commitments) {
+        const saved = await insertCommitment(db, {
+          sourceMessageId: `sent:${subject}`,
+          text:            c.text,
+          recipient:       c.recipient,
+          deadline:        c.deadline,
+          remindAt:        c.remindAt,
+        });
+
+        // Queue a slib_reminder immediately so it surfaces in the dashboard.
+        const title = c.recipient
+          ? `Commitment to ${c.recipient}: due ${c.deadline}`
+          : `Commitment due ${c.deadline}`;
+
+        const deadlineDate = new Date(c.deadline + "T12:00:00");
+        const formatted = deadlineDate.toLocaleDateString("en-US", {
+          weekday: "long", month: "long", day: "numeric", year: "numeric",
+        });
+        const recipientLine = c.recipient
+          ? `You told **${c.recipient}** you would:`
+          : "You committed to:";
+
+        const itemBody =
+          `${recipientLine}\n\n` +
+          `> "${c.text}"\n\n` +
+          `**Deadline:** ${formatted}\n\n` +
+          `Approve to confirm this commitment is on track, or Reject to dismiss it.`;
+
+        const actionItem = await insertActionItem(db, {
+          type:     "slib_reminder",
+          title,
+          body:     itemBody,
+          metadata: {
+            commitmentId: saved.id,
+            deadline:     c.deadline,
+            recipient:    c.recipient,
+            verbatim:     c.text,
+            source:       `sent:${subject}`,
+          },
+          priority: 2,
+        });
+
+        // Mark commitment reminder as sent so the background cycle won't duplicate it.
+        const { markReminderSent } = await import("../db/queries.js");
+        await markReminderSent(db, saved.id, actionItem.id);
+
+        console.log(`[Pulse:SlibGuard] Commitment detected in sent email "${subject}": "${c.text}" → ${c.deadline}`);
+      }
+    } catch (err) {
+      console.warn("[Pulse:SlibGuard] Error scanning sent email for commitments:", err instanceof Error ? err.message : String(err));
+    }
+  })();
+}
 
 /** Display name used in outgoing email signatures. Configurable via env. */
 const USER_DISPLAY_NAME =
@@ -563,7 +690,7 @@ export const pulseRoutes: Route[] = [
           `Subject: ${sanitizeForPrompt(subject ?? "(no subject)", 200)}\n\n` +
           `${sanitizeForPrompt(body, 1200)}`;
 
-        const summary = await runtime.useModel(ModelType.TEXT_SMALL, { prompt });
+        const summary = await useModelWithFallback(runtime, ModelType.TEXT_SMALL, { prompt });
         ok(res, { summary: summary.trim() });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -666,6 +793,11 @@ export const pulseRoutes: Route[] = [
         console.log("[Pulse:Routes] POST /pulse/process — running full processing cycle…");
         const result = await bgSvc.runProcessingCycle();
 
+        // Refresh briefing after cycle so BriefingPanel reflects the new queue state.
+        void (runtime.getService(MorningBriefingService.serviceType) as MorningBriefingService | null)
+          ?.generateBriefing()
+          .catch(() => { /* non-fatal */ });
+
         ok(res, {
           success: true,
           processed:  result.emails.processed,
@@ -758,6 +890,7 @@ export const pulseRoutes: Route[] = [
         });
 
         recordSentDraft(subject, emailBody, db);
+        scanSentEmailForCommitments(runtime, db, subject, emailBody);
         console.log(`[Pulse:Routes] Sent email for item ${itemId}, messageId=${messageId}`);
         ok(res, { success: true, messageId });
       } catch (e) {
@@ -778,6 +911,156 @@ export const pulseRoutes: Route[] = [
     name: "Pulse Briefing",
     handler: async (_req: RouteRequest, res: RouteResponse, _runtime: IAgentRuntime) => {
       ok(res, { briefing: MorningBriefingService.lastBriefingData });
+    },
+  },
+
+  // ── POST /pulse/weather ──────────────────────────────────────────────────
+  // Fetches a real weather forecast from wttr.in so the frontend never has to
+  // rely on the LLM hallucinating weather data. Extracts city name with regex
+  // (defaults to "Prague" for the demo). Returns a formatted multi-day forecast.
+  {
+    type: "POST" as const,
+    path: "/weather",
+    handler: async (req: RouteRequest, res: RouteResponse) => {
+      try {
+        const { message } = (req.body as { message?: string }) ?? {};
+
+        // Extract city from the message — e.g. "weather in Prague this week"
+        const cityMatch = (message ?? "").match(
+          /\b(?:in|at|for)\s+([A-Z][a-zA-ZÀ-ž\s-]{1,30})(?:\s+this|\s+today|\s+tomorrow|\s+next|[?!.,]|$)/i
+        );
+        const city = cityMatch?.[1]?.trim() ?? "Prague";
+
+        const wttrUrl = `https://wttr.in/${encodeURIComponent(city)}?format=j1`;
+        const wttrRes = await fetch(wttrUrl, {
+          headers: { "User-Agent": "Pulse-Agent/1.0 (weather-fetch)" },
+          signal: AbortSignal.timeout(8_000),
+        });
+
+        if (!wttrRes.ok) {
+          err(res, `Weather service returned ${wttrRes.status}`, 502);
+          return;
+        }
+
+        interface WttrHourly { time: string; tempC: string; weatherDesc: Array<{ value: string }>; chanceofrain: string; }
+        interface WttrDay { date: string; maxtempC: string; mintempC: string; hourly: WttrHourly[]; }
+        interface WttrResponse { weather: WttrDay[]; }
+
+        const data = (await wttrRes.json()) as WttrResponse;
+        const days = data.weather ?? [];
+
+        const lines: string[] = [`**Weather in ${city}**\n`];
+        for (const day of days.slice(0, 4)) {
+          const date = new Date(day.date).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+          const desc = day.hourly
+            .find((h) => parseInt(h.time) >= 900)
+            ?.weatherDesc[0]?.value ?? day.hourly[0]?.weatherDesc[0]?.value ?? "—";
+          const rain = day.hourly.reduce((max, h) => Math.max(max, parseInt(h.chanceofrain ?? "0")), 0);
+          lines.push(`**${date}**: ${desc}, ${day.mintempC}–${day.maxtempC}°C, ${rain}% chance of rain`);
+        }
+
+        ok(res, { forecast: lines.join("\n"), city });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[Pulse:Routes] POST /pulse/weather: ${msg}`);
+        err(res, `Couldn't fetch weather: ${msg}`, 502);
+      }
+    },
+  },
+
+  // ── POST /pulse/log-commitment ───────────────────────────────────────────
+  // Saves a commitment typed directly in chat (not from a sent email).
+  // Uses the same extractCommitments + insertCommitment + slib_reminder path
+  // as the sent-email scanner — so it shows up in the queue immediately.
+  {
+    type: "POST" as const,
+    path: "/log-commitment",
+    handler: async (req: RouteRequest, res: RouteResponse, runtime: IAgentRuntime) => {
+      try {
+        const { text } = (req.body as { text?: string }) ?? {};
+        if (!text?.trim()) { err(res, "text required", 400); return; }
+
+        const db = (runtime as unknown as { db: Db }).db as Db;
+        if (!db) { err(res, "Database unavailable", 503); return; }
+
+        const commitments = await extractCommitments(runtime, text.trim());
+        if (commitments.length === 0) {
+          ok(res, { saved: false, deadline: null, reminderText: "No commitment found in that message." });
+          return;
+        }
+
+        const c = commitments[0];
+        const saved = await insertCommitment(db, {
+          sourceMessageId: `chat:${Date.now()}`,
+          text:            c.text,
+          recipient:       c.recipient,
+          deadline:        c.deadline,
+          remindAt:        c.remindAt,
+        });
+
+        const title = c.recipient
+          ? `Commitment to ${c.recipient}: due ${c.deadline}`
+          : `Commitment due ${c.deadline}`;
+
+        const deadlineDate = new Date(c.deadline + "T12:00:00");
+        const formatted = deadlineDate.toLocaleDateString("en-US", {
+          weekday: "long", month: "long", day: "numeric", year: "numeric",
+        });
+        const recipientLine = c.recipient
+          ? `You told **${c.recipient}** you would:`
+          : "You committed to:";
+
+        const itemBody =
+          `${recipientLine}\n\n` +
+          `> "${c.text}"\n\n` +
+          `**Deadline:** ${formatted}\n\n` +
+          `Approve to confirm this commitment is on track, or Reject to dismiss it.`;
+
+        const actionItem = await insertActionItem(db, {
+          type:     "slib_reminder",
+          title,
+          body:     itemBody,
+          metadata: {
+            commitmentId: saved.id,
+            deadline:     c.deadline,
+            recipient:    c.recipient,
+            verbatim:     c.text,
+            source:       "chat",
+          },
+          priority: 2,
+        });
+
+        const { markReminderSent } = await import("../db/queries.js");
+        await markReminderSent(db, saved.id, actionItem.id);
+
+        console.log(`[Pulse:SlibGuard] Chat commitment logged — deadline=${c.deadline}, item=${actionItem.id}`);
+        ok(res, { saved: true, deadline: c.deadline, reminderText: title });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[Pulse:Routes] POST /pulse/log-commitment: ${msg}`);
+        err(res, msg);
+      }
+    },
+  },
+
+  // ── POST /pulse/briefing/refresh ─────────────────────────────────────────
+  // Re-generates the morning briefing from current queue/calendar state.
+  // Called automatically after every Sync Now cycle.
+  {
+    type: "POST" as const,
+    path: "/briefing/refresh",
+    handler: async (_req: RouteRequest, res: RouteResponse, runtime: IAgentRuntime) => {
+      try {
+        const svc = runtime.getService(
+          MorningBriefingService.serviceType
+        ) as MorningBriefingService | null;
+        if (!svc) { err(res, "MorningBriefingService not available", 503); return; }
+        await svc.generateBriefing();
+        ok(res, { briefing: MorningBriefingService.lastBriefingData });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        err(res, msg);
+      }
     },
   },
 
@@ -964,7 +1247,7 @@ export const pulseRoutes: Route[] = [
 
         const TIMEOUT_MS = 90_000;
         const raw = await Promise.race([
-          runtime.useModel(ModelType.TEXT_SMALL, {
+          useModelWithFallback(runtime, ModelType.TEXT_SMALL, {
             prompt,
             maxTokens: 1024,
             temperature: 0.4,
@@ -1025,7 +1308,7 @@ export const pulseRoutes: Route[] = [
         ].join("\n");
 
         const raw = await Promise.race([
-          runtime.useModel(ModelType.TEXT_SMALL, {
+          useModelWithFallback(runtime, ModelType.TEXT_SMALL, {
             prompt,
             maxTokens: 40,
             temperature: 0,
@@ -1080,23 +1363,18 @@ export const pulseRoutes: Route[] = [
         ) as CalendarMcpService | null;
         if (!calSvc) { err(res, "CalendarMcpService not available", 503); return; }
 
-        const today    = new Date().toISOString().slice(0, 10);
-        const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
-
         const extractPrompt =
-          `Today is ${today}. Extract calendar event details from the user message and return ONLY a JSON object.\n` +
-          `User message: "${message}"\n\n` +
-          `JSON format:\n` +
+          `${buildLlmDateContext()}\n\n` +
+          `Extract calendar event details from the user message and return ONLY a JSON object:\n` +
           `{"title":"...","date":"YYYY-MM-DD","startTime":"HH:MM","durationMinutes":60,"timeZone":null}\n\n` +
+          `User message: "${message}"\n\n` +
           `Rules:\n` +
-          `- "tomorrow" = ${tomorrow}\n` +
-          `- "morning" = 09:00, "noon" = 12:00, "afternoon" = 14:00, "evening" = 18:00\n` +
-          `- Resolve weekday names relative to today (${today})\n` +
-          `- timeZone: IANA string if mentioned, otherwise null\n` +
+          `- Use EXACT dates from the reference table above — never compute day names yourself.\n` +
+          `- timeZone: IANA string only if explicitly mentioned, otherwise null.\n` +
           `- Return ONLY raw JSON, no markdown fences, no extra text.`;
 
         const raw = await Promise.race([
-          runtime.useModel(ModelType.TEXT_SMALL, {
+          useModelWithFallback(runtime, ModelType.TEXT_SMALL, {
             prompt: extractPrompt,
             maxTokens: 256,
             temperature: 0.1,
@@ -1140,6 +1418,34 @@ export const pulseRoutes: Route[] = [
         const endMm     = totalMins % 60;
         const endIso    = `${details.date}T${pad(endHh)}:${pad(endMm)}:00`;
         const timeZone  = details.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+        // ── Conflict pre-check ──────────────────────────────────────────────
+        // Fetch existing events and block creation if the slot is already taken.
+        // Skip check if user explicitly overrides.
+        const isForced = /schedule\s+anyway|force\s+it|override|ignore\s+conflict/i.test(message);
+        if (!isForced) {
+          try {
+            const existingEvents = await calSvc.getEvents(14);
+            const overlapping = existingEvents.filter((ev) =>
+              eventsOverlap(ev.start, ev.end, startIso, endIso)
+            );
+            if (overlapping.length > 0) {
+              const conflictList = overlapping
+                .map((ev) => `**${ev.title}** (${ev.start.slice(11, 16)}–${ev.end.slice(11, 16)})`)
+                .join(", ");
+              err(
+                res,
+                `You already have ${conflictList} at that time. Event not created. ` +
+                `Choose a different time or say "schedule anyway" to override.`,
+                409
+              );
+              return;
+            }
+          } catch (checkErr) {
+            // Non-fatal — if we can't fetch events, proceed with creation.
+            console.warn("[Pulse:Routes] Conflict pre-check failed (proceeding):", checkErr instanceof Error ? checkErr.message : String(checkErr));
+          }
+        }
 
         console.log(`[Pulse:Routes] Creating calendar event: "${details.title}" ${startIso} tz=${timeZone}`);
 
@@ -1244,7 +1550,7 @@ export const pulseRoutes: Route[] = [
   {
     type: "POST" as const,
     path: "/reschedule-event",
-    handler: async (req: RouteRequest, res: RouteResponse) => {
+    handler: async (req: RouteRequest, res: RouteResponse, runtime: IAgentRuntime) => {
       try {
         const { eventId, newStart, newEnd, timeZone } =
           (req.body as {
@@ -1257,6 +1563,27 @@ export const pulseRoutes: Route[] = [
         if (!eventId || !newStart || !newEnd) {
           err(res, "eventId, newStart, newEnd required", 400);
           return;
+        }
+
+        // Conflict pre-check — ensure target slot is free.
+        const calSvc = runtime.getService(CalendarMcpService.serviceType) as CalendarMcpService | null;
+        if (calSvc) {
+          try {
+            const existing = await calSvc.getEvents(14);
+            const clashes = existing.filter((ev) => {
+              if (ev.id === eventId) return false;
+              return eventsOverlap(ev.start, ev.end, newStart, newEnd);
+            });
+            if (clashes.length > 0) {
+              const list = clashes
+                .map((ev) => `**${ev.title}** (${new Date(ev.start).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}–${new Date(ev.end).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })})`)
+                .join(", ");
+              err(res, `That slot is already taken by ${list}. Choose a different time.`, 409);
+              return;
+            }
+          } catch {
+            // Non-fatal — proceed if check fails.
+          }
         }
 
         const updated = await updateEvent(eventId, {
@@ -1354,32 +1681,41 @@ export const pulseRoutes: Route[] = [
 
         const hasIds = !!(eventAId && eventBId);
 
-        // Step 1: LLM extracts which event to reschedule and target time.
+        // Step 1: LLM extracts which event to reschedule, target time, and target date.
+        const dateCtx = buildLlmDateContext();
         const extractionPrompt =
+          `${dateCtx}\n\n` +
           `You are a scheduling assistant. Extract rescheduling intent from a user message.\n\n` +
           `Context:\n` +
           `  Event A: "${eventATitle ?? "Event A"}" (${eventAStart?.slice(11, 16) ?? "?"}–${eventAEnd?.slice(11, 16) ?? "?"})\n` +
-          `  Event B: "${eventBTitle ?? "Event B"}" (${eventBStart?.slice(11, 16) ?? "?"}–${eventBEnd?.slice(11, 16) ?? "?"})\n\n` +
+          `  Event B: "${eventBTitle ?? "Event B"}" (${eventBStart?.slice(11, 16) ?? "?"}–${eventBEnd?.slice(11, 16) ?? "?"})\n` +
+          `  Conflict date: ${date ?? eventAStart?.slice(0, 10) ?? "unknown"}\n\n` +
           `User message: "${message}"\n\n` +
           `Reply with ONLY valid JSON, no markdown:\n` +
-          `{"targetEvent":"A"|"B"|"unknown","targetTime":"HH:MM"|null,"reasoning":"..."}\n` +
-          `targetTime must be 24h format (e.g. "16:00") or null if not mentioned.`;
+          `{"targetEvent":"A"|"B"|"unknown","targetTime":"HH:MM"|null,"targetDate":"YYYY-MM-DD"|null,"reasoning":"..."}\n` +
+          `Rules:\n` +
+          `- targetTime: 24h format (e.g. "16:00") or null if not mentioned.\n` +
+          `- targetDate: use the reference table above to resolve day names. null if same day as conflict.\n` +
+          `- If user says "reschedule to Thursday", use the thursday date from the table.\n` +
+          `- Return ONLY raw JSON, no markdown.`;
 
-        const raw = await runtime.useModel(ModelType.TEXT_SMALL, {
+        const raw = await useModelWithFallback(runtime, ModelType.TEXT_SMALL, {
           prompt: extractionPrompt,
-          maxTokens: 120,
+          maxTokens: 150,
           temperature: 0.1,
         });
 
-        let extracted: { targetEvent: "A" | "B" | "unknown"; targetTime: string | null } = {
+        let extracted: { targetEvent: "A" | "B" | "unknown"; targetTime: string | null; targetDate: string | null } = {
           targetEvent: "unknown",
           targetTime: null,
+          targetDate: null,
         };
         try {
           const cleaned = raw.replace(/```(?:json)?/gi, "").trim();
           const parsed = JSON.parse(cleaned) as typeof extracted;
           extracted.targetEvent = parsed.targetEvent ?? "unknown";
           extracted.targetTime  = parsed.targetTime ?? null;
+          extracted.targetDate  = parsed.targetDate ?? null;
         } catch {
           // Keep defaults — fall through to suggestions.
         }
@@ -1401,7 +1737,11 @@ export const pulseRoutes: Route[] = [
 
         // If we have a specific time, reschedule immediately.
         if (extracted.targetTime && chosenId && hasIds) {
-          const targetDate = date ?? (eventAStart?.slice(0, 10) ?? new Date().toISOString().slice(0, 10));
+          // Use LLM-extracted date if provided (e.g. "move to Thursday"), else same day as conflict.
+          const targetDate = extracted.targetDate
+            ?? date
+            ?? eventAStart?.slice(0, 10)
+            ?? new Date().toISOString().slice(0, 10);
           const newStart = `${targetDate}T${extracted.targetTime}:00`;
 
           // Build end time with pure arithmetic — never use toISOString() which converts to UTC.
@@ -1413,6 +1753,30 @@ export const pulseRoutes: Route[] = [
 
           const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
+          // Pre-check: make sure the target slot isn't already occupied by another event.
+          const calSvcForCheck = runtime.getService(CalendarMcpService.serviceType) as CalendarMcpService | null;
+          if (calSvcForCheck) {
+            try {
+              const allEvents = await calSvcForCheck.getEvents(14);
+              const clashes = allEvents.filter((ev) => {
+                if (ev.id === chosenId) return false; // ignore the event being moved
+                return eventsOverlap(ev.start, ev.end, newStart, newEnd);
+              });
+              if (clashes.length > 0) {
+                const clashList = clashes
+                  .map((ev) => `**${ev.title}** (${ev.start.slice(11, 16)}–${ev.end.slice(11, 16)})`)
+                  .join(", ");
+                ok(res, {
+                  action: "suggestions",
+                  text:   `⚠ That slot is already taken by ${clashList}. Please choose a different time.`,
+                });
+                return;
+              }
+            } catch {
+              // Non-fatal — proceed with the move if the check fails.
+            }
+          }
+
           const updated = await updateEvent(chosenId, { start: newStart, end: newEnd, timeZone: tz });
 
           const readable = new Date(newStart).toLocaleString("en-US", {
@@ -1420,7 +1784,7 @@ export const pulseRoutes: Route[] = [
             hour: "numeric", minute: "2-digit",
           });
 
-          // Check if the new time still overlaps with the OTHER event.
+          // Check if the new time still overlaps with the OTHER conflicting event.
           const otherStart = extracted.targetEvent === "A" ? eventBStart : eventAStart;
           const otherEnd   = extracted.targetEvent === "A" ? eventBEnd   : eventAEnd;
           const newStartMs = new Date(newStart).getTime();
@@ -1493,6 +1857,128 @@ export const pulseRoutes: Route[] = [
     },
   },
 
+  // ── POST /pulse/reschedule-by-title ──────────────────────────────────────
+  // Natural-language reschedule without requiring event IDs up front.
+  // Used when the user types "reschedule Meeting X to 3pm" from any context
+  // (including while a draft is open). LLM extracts title + target time,
+  // we fuzzy-match against the user's upcoming events, then delegate to the
+  // same conflict-checked update path used by /reschedule-event.
+  {
+    type: "POST" as const,
+    path: "/reschedule-by-title",
+    handler: async (req: RouteRequest, res: RouteResponse, runtime: IAgentRuntime) => {
+      try {
+        const { message } = (req.body as { message?: string }) ?? {};
+        if (!message) { err(res, "message required", 400); return; }
+
+        const dateCtx = buildLlmDateContext();
+        const extractPrompt =
+          `${dateCtx}\n\n` +
+          `You are a scheduling assistant. The user wants to reschedule a calendar event.\n` +
+          `Extract the event title to move, and the target time/date.\n\n` +
+          `User message: "${message}"\n\n` +
+          `Reply with ONLY valid JSON, no markdown:\n` +
+          `{"eventTitle":"<string or null>","targetTime":"HH:MM or null","targetDate":"YYYY-MM-DD or null"}\n` +
+          `Rules:\n` +
+          `- eventTitle: the name/title of the event to reschedule (or null if unclear).\n` +
+          `- targetTime: 24h format. Convert "3pm" → "15:00", "11am" → "11:00".\n` +
+          `- targetDate: use the reference table above. null means same day or today.\n` +
+          `- Return ONLY raw JSON.`;
+
+        const raw = await useModelWithFallback(runtime, ModelType.TEXT_SMALL, {
+          prompt: extractPrompt,
+          maxTokens: 100,
+          temperature: 0.1,
+        });
+
+        let extracted: { eventTitle: string | null; targetTime: string | null; targetDate: string | null } = {
+          eventTitle: null, targetTime: null, targetDate: null,
+        };
+        try {
+          const cleaned = raw.replace(/```(?:json)?/gi, "").trim();
+          const parsed = JSON.parse(cleaned) as typeof extracted;
+          extracted.eventTitle  = parsed.eventTitle  ?? null;
+          extracted.targetTime  = parsed.targetTime  ?? null;
+          extracted.targetDate  = parsed.targetDate  ?? null;
+        } catch {
+          // Fall through to error response.
+        }
+
+        if (!extracted.eventTitle || !extracted.targetTime) {
+          ok(res, {
+            success: false,
+            text: "I couldn't figure out which event to reschedule or what time to move it to. Try something like: \"Reschedule the Daily Stand-up to 3pm Tuesday\".",
+          });
+          return;
+        }
+
+        // Fuzzy-match: find the event by title in the next 14 days.
+        const calSvc = runtime.getService(CalendarMcpService.serviceType) as CalendarMcpService | null;
+        if (!calSvc) {
+          ok(res, { success: false, text: "Calendar service unavailable." });
+          return;
+        }
+
+        const upcoming = await calSvc.getEvents(14);
+        const needle = extracted.eventTitle.toLowerCase();
+        const match = upcoming
+          .filter((ev) => !ev.allDay)
+          .sort((a, b) => {
+            const scoreA = a.title.toLowerCase().includes(needle) ? -1 : 0;
+            const scoreB = b.title.toLowerCase().includes(needle) ? -1 : 0;
+            return scoreA - scoreB;
+          })
+          .find((ev) => ev.title.toLowerCase().includes(needle));
+
+        if (!match) {
+          ok(res, {
+            success: false,
+            text: `I couldn't find an upcoming event matching "${extracted.eventTitle}". Check the exact event name in your calendar.`,
+          });
+          return;
+        }
+
+        const targetDate = extracted.targetDate ?? match.start.slice(0, 10);
+        const newStart   = `${targetDate}T${extracted.targetTime}:00`;
+        const durationMs = new Date(match.end).getTime() - new Date(match.start).getTime();
+        const durationMin = Math.max(15, Math.round(durationMs / 60_000));
+        const [h, m] = extracted.targetTime.split(":").map(Number);
+        const endMin = h * 60 + m + durationMin;
+        const newEnd = `${targetDate}T${String(Math.floor(endMin / 60) % 24).padStart(2, "0")}:${String(endMin % 60).padStart(2, "0")}:00`;
+
+        // Conflict pre-check.
+        const clashes = upcoming.filter((ev) => {
+          if (ev.id === match.id) return false;
+          return eventsOverlap(ev.start, ev.end, newStart, newEnd);
+        });
+        if (clashes.length > 0) {
+          const list = clashes
+            .map((ev) => `**${ev.title}** (${new Date(ev.start).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })})`)
+            .join(", ");
+          ok(res, { success: false, text: `⚠ That slot is already taken by ${list}. Choose a different time.` });
+          return;
+        }
+
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const updated = await updateEvent(match.id, { start: newStart, end: newEnd, timeZone: tz });
+
+        const readable = new Date(newStart).toLocaleString("en-US", {
+          weekday: "short", month: "short", day: "numeric",
+          hour: "numeric", minute: "2-digit",
+        });
+
+        ok(res, {
+          success: true,
+          text: `Done! **${updated.title}** moved to **${readable}**.`,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[Pulse:Routes] POST /pulse/reschedule-by-title: ${msg}`);
+        err(res, msg);
+      }
+    },
+  },
+
   // ── POST /pulse/send-direct ──────────────────────────────────────────────
   // Send an email without requiring an existing action item in the queue.
   // Used for document-summary emails drafted inline from chat.
@@ -1531,6 +2017,7 @@ export const pulseRoutes: Route[] = [
         const db = runtime.db as unknown as Db;
         const messageId = await gmailSvc.sendEmail(to.trim(), subject.trim(), emailBody.trim(), attachments.length ? attachments : undefined);
         recordSentDraft(subject.trim(), emailBody.trim(), db);
+        scanSentEmailForCommitments(runtime, db, subject.trim(), emailBody.trim());
         console.log(`[Pulse:Routes] send-direct → ${to}, messageId=${messageId}`);
         ok(res, { success: true, messageId });
       } catch (e) {
@@ -1611,7 +2098,7 @@ export const pulseRoutes: Route[] = [
         let analysis = summary;
         try {
           const raw = await Promise.race([
-            runtime.useModel(ModelType.TEXT_SMALL, {
+            useModelWithFallback(runtime, ModelType.TEXT_SMALL, {
               prompt: analysisPrompt,
               maxTokens: 600,
               temperature: 0.2,
@@ -1864,7 +2351,7 @@ Nothing else.`;
   try {
     const timeoutMs = 5_000;
     const raw = await Promise.race([
-      runtime.useModel(ModelType.TEXT_SMALL, { prompt, maxTokens: 80, temperature: 0.3 }),
+      useModelWithFallback(runtime, ModelType.TEXT_SMALL, { prompt, maxTokens: 80, temperature: 0.3 }),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("LLM timeout")), timeoutMs),
       ),

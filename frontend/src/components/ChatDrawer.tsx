@@ -518,6 +518,9 @@ function InlineEmailSend({ draft, onSent, onDiscard, userDisplayName, attachDoc 
   const [error, setError] = useState<string | null>(null);
   const [attachPdf, setAttachPdf] = useState(!!attachDoc);
 
+  // Sync body when parent rewrites the draft (e.g. "make draft from DEADLINES only")
+  useEffect(() => { setBody(draft.body); }, [draft.body]);
+
   async function handleSend() {
     if (!to.trim()) { setError("Enter a recipient email"); return; }
     setSending(true);
@@ -743,6 +746,8 @@ export function ChatDrawer({
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastDraftItemId = useRef<string | null>(null);
   const currentDraftBodyRef = useRef<string>("");
+  /** Last weather forecast fetched — injected as context for follow-up questions. */
+  const lastWeatherRef = useRef<string | null>(null);
   const currentDraftToRef = useRef<string>("");
   const emailDraftRef = useRef<EmailDraftContext | null | undefined>(null);
   const draftPrimedRef = useRef<string | null>(null);
@@ -1126,10 +1131,161 @@ export function ChatDrawer({
           ]);
         } catch (e) {
           const message = e instanceof Error ? e.message : "Unknown error";
+          // 409 conflict messages are already user-friendly — show as-is.
+          const isConflict = message.includes("You already have") || message.includes("at that time");
           setMessages((prev) => [
             ...prev,
-            { role: "agent", text: `Couldn't create the event: ${message}`, ts: new Date() },
+            {
+              role: "agent",
+              text: isConflict ? `⚠ ${message}` : `Couldn't create the event: ${message}`,
+              ts: new Date(),
+            },
           ]);
+        } finally {
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      // ── General reschedule intercept: fires before draft mode check ──────────
+      // A user might have a draft open and type "reschedule the stand-up to 3pm" —
+      // that's a calendar intent, not an email-edit instruction. Intercept it here
+      // regardless of draft state so it doesn't get routed to draft-assist.
+      const RESCHEDULE_GLOBAL_RE =
+        /\b(reschedule|move|shift)\b.{0,120}\b(to\s+\d|at\s+\d|\d{1,2}:\d{2}|[ap]m|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}\s*[ap]m)/i;
+
+      if (RESCHEDULE_GLOBAL_RE.test(trimmed) && !conflictContext) {
+        try {
+          const result = await pulseApi.rescheduleByTitle(trimmed);
+          setMessages((prev) => [
+            ...prev,
+            { role: "agent", text: result.text, ts: new Date(), positive: result.success },
+          ]);
+          if (result.success) onQueueRefresh?.();
+        } catch (e) {
+          const message = e instanceof Error ? e.message : "Unknown error";
+          const isConflict = message.includes("already") || message.includes("conflict");
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "agent",
+              text: isConflict ? `⚠ ${message}` : `Couldn't reschedule: ${message}`,
+              ts: new Date(),
+            },
+          ]);
+        } finally {
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      // ── Email/sync intercept ─────────────────────────────────────────────────
+      // Bypass ElizaOS action routing (unreliable with small models) — call the
+      // processing cycle directly and force a queue refresh.
+      const EMAIL_PROCESS_RE =
+        /\b(check|process|fetch|scan|read|sync|get)\b.{0,40}\b(email|inbox|mail)\b/i;
+      const FOLLOW_UP_RE =
+        /\b(check|detect|find|show|scan)\b.{0,40}\bfollow.?up/i;
+
+      if (!draft && (EMAIL_PROCESS_RE.test(trimmed) || FOLLOW_UP_RE.test(trimmed))) {
+        try {
+          setMessages((prev) => [...prev, {
+            role: "agent",
+            text: "Running full sync — emails, calendar conflicts, and commitment reminders…",
+            ts: new Date(),
+          }]);
+          await pulseApi.processInbox();
+          onQueueRefresh?.();
+          setMessages((prev) => [...prev, {
+            role: "agent",
+            text: "✓ Sync complete. Check your queue — new items have been added.",
+            ts: new Date(),
+            positive: true,
+          }]);
+        } catch (e) {
+          const message = e instanceof Error ? e.message : "Sync failed";
+          setMessages((prev) => [...prev, {
+            role: "agent", text: `Sync failed: ${message}`, ts: new Date(),
+          }]);
+        } finally {
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      // ── Commitment intercept ─────────────────────────────────────────────────
+      // When the user types a first-person commitment ("I will send...", "I'll have..."),
+      // save it as a slib_reminder so it appears in the queue. The ElizaOS agent
+      // would only say "noted" without actually persisting anything.
+      const COMMITMENT_RE =
+        /\b(i\s+will\b|i'll\b|i\s+promise\b|i\s+commit\b|i\s+need\s+to\b|i\s+must\b|i\s+have\s+to\b)\b/i;
+      if (!draft && !conflictContext && COMMITMENT_RE.test(trimmed)) {
+        try {
+          const result = await pulseApi.logCommitment(trimmed);
+          const confirmText = result.deadline
+            ? `Commitment logged — deadline **${result.deadline}**. It's in your queue under Slib Guard.`
+            : `Commitment logged. It's in your queue under Slib Guard.`;
+          setMessages((prev) => [...prev, { role: "agent", text: confirmText, ts: new Date(), positive: true }]);
+          onQueueRefresh?.();
+        } catch (e) {
+          const message = e instanceof Error ? e.message : "Couldn't log commitment";
+          setMessages((prev) => [...prev, { role: "agent", text: message, ts: new Date() }]);
+        } finally {
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      // ── Weather intercept ────────────────────────────────────────────────────
+      // Fetch real forecast from wttr.in via the backend. Small models hallucinate
+      // weather data badly. Store result for follow-up questions ("best day for golf?").
+      const WEATHER_RE =
+        /\b(weather|forecast|rain|snow|sunny|cloudy|temperature|degrees?|celsius|fahrenheit)\b/i;
+      if (!draft && !conflictContext && WEATHER_RE.test(trimmed)) {
+        try {
+          const result = await pulseApi.getWeather(trimmed);
+          lastWeatherRef.current = result.forecast;
+          setMessages((prev) => [...prev, {
+            role: "agent",
+            text: result.forecast,
+            ts: new Date(),
+          }]);
+        } catch (e) {
+          const message = e instanceof Error ? e.message : "Couldn't fetch weather";
+          setMessages((prev) => [...prev, { role: "agent", text: message, ts: new Date() }]);
+        } finally {
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      // ── Inline doc draft mode ────────────────────────────────────────────────
+      // When the user has a doc-email draft open (created from PDF DocActionChips),
+      // route all instructions to draft-assist and update the draft body in place.
+      if (inlineEmailDraft && !conflictContext) {
+        try {
+          const { reply: rawReply } = await pulseApi.draftAssist({
+            subject: inlineEmailDraft.subject,
+            to: inlineEmailDraft.to,
+            currentBody: inlineEmailDraft.body,
+            instruction: trimmed,
+          });
+          const newBody = rawReply
+            .replace(/^```[\w]*\n?/im, "")
+            .replace(/\n?```$/m, "")
+            .replace(/^---\n?/m, "")
+            .replace(/\n?---$/m, "")
+            .replace(/\[CALENDAR_INTENT\]/g, "")
+            .trim();
+          setInlineEmailDraft((prev) => prev ? { ...prev, body: newBody } : null);
+          setMessages((prev) => [...prev, {
+            role: "agent",
+            text: "Draft updated above. Edit it or click Send Email when ready.",
+            ts: new Date(),
+          }]);
+        } catch (e) {
+          const message = e instanceof Error ? e.message : "Draft update failed";
+          setMessages((prev) => [...prev, { role: "agent", text: message, ts: new Date() }]);
         } finally {
           setIsLoading(false);
         }
@@ -1250,55 +1406,78 @@ export function ChatDrawer({
         return;
       }
 
+      // ── Conflict context ─────────────────────────────────────────────────────
+      // Two paths:
+      //   • Explicit reschedule (time mentioned) → call /pulse/resolve-conflict
+      //   • Anything else → return a deterministic conflict summary with options
+      //     so the user can decide before anything is touched.
       const RESCHEDULE_RE =
         /\b(reschedule|move|shift|change|push|bump)\b.{0,120}\b(to\s+\d|at\s+\d|\d{1,2}:\d{2}|[ap]m|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}\s*[ap]m)/i;
       const RESCHEDULE_SIMPLE_RE =
-        /\b(reschedule|move it|shift it|change it|can you move|please move|please reschedule)\b/i;
+        /\b(reschedule\s+it|move\s+it|shift\s+it|can\s+you\s+(move|reschedule)|please\s+(move|reschedule))\b/i;
 
-      if (!draft && conflictContext && (RESCHEDULE_RE.test(trimmed) || RESCHEDULE_SIMPLE_RE.test(trimmed))) {
-        try {
-          const result = await pulseApi.resolveConflict({
-            message:     trimmed,
-            eventAId:    conflictContext.eventAId,
-            eventBId:    conflictContext.eventBId,
-            eventATitle: conflictContext.eventATitle,
-            eventBTitle: conflictContext.eventBTitle,
-            eventAStart: conflictContext.eventAStart,
-            eventAEnd:   conflictContext.eventAEnd,
-            eventBStart: conflictContext.eventBStart,
-            eventBEnd:   conflictContext.eventBEnd,
-            date:        conflictContext.date,
-          });
-          setMessages((prev) => [
-            ...prev,
-            { role: "agent", text: result.text, ts: new Date(), positive: result.action === "rescheduled" },
-          ]);
-          if (result.action === "rescheduled" && conflictContext.itemId) {
-            const itemId = conflictContext.itemId;
-            setMessages((prev) => [...prev, {
-              role: "agent",
-              text: `Check your calendar to confirm there are no other clashes, then mark the conflict as resolved.`,
-              ts: new Date(),
-              resolveItemId: itemId,
-            }]);
-            onQueueRefresh?.();
+      if (!draft && conflictContext) {
+        if (RESCHEDULE_RE.test(trimmed) || RESCHEDULE_SIMPLE_RE.test(trimmed)) {
+          // ── Explicit reschedule intent → act ───────────────────────────────
+          try {
+            const result = await pulseApi.resolveConflict({
+              message:     trimmed,
+              eventAId:    conflictContext.eventAId,
+              eventBId:    conflictContext.eventBId,
+              eventATitle: conflictContext.eventATitle,
+              eventBTitle: conflictContext.eventBTitle,
+              eventAStart: conflictContext.eventAStart,
+              eventAEnd:   conflictContext.eventAEnd,
+              eventBStart: conflictContext.eventBStart,
+              eventBEnd:   conflictContext.eventBEnd,
+              date:        conflictContext.date,
+            });
+            setMessages((prev) => [
+              ...prev,
+              { role: "agent", text: result.text, ts: new Date(), positive: result.action === "rescheduled" },
+            ]);
+            if (result.action === "rescheduled" && conflictContext.itemId) {
+              const itemId = conflictContext.itemId;
+              setMessages((prev) => [...prev, {
+                role: "agent",
+                text: `Check your calendar to confirm there are no other clashes, then mark the conflict as resolved.`,
+                ts: new Date(),
+                resolveItemId: itemId,
+              }]);
+              onQueueRefresh?.();
+            }
+          } catch (e) {
+            const message = e instanceof Error ? e.message : "Unknown error";
+            const is404 = message.includes("404") || message.includes("Not Found");
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: "agent",
+                text: is404
+                  ? "I couldn't find this event in your Google Calendar — it may have already been moved or doesn't exist yet. You can reschedule it directly in Google Calendar."
+                  : `Sorry, I couldn't reschedule that: ${message}`,
+                ts: new Date(),
+              },
+            ]);
+          } finally {
+            if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
+            abortRef.current = null;
+            setIsLoading(false);
           }
-        } catch (e) {
-          const message = e instanceof Error ? e.message : "Unknown error";
-          const is404 = message.includes("404") || message.includes("Not Found");
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: "agent",
-              text: is404
-                ? "I couldn't find this event in your Google Calendar — it may have already been moved or doesn't exist yet. You can reschedule it directly in Google Calendar."
-                : `Sorry, I couldn't reschedule that: ${message}`,
-              ts: new Date(),
-            },
-          ]);
-        } finally {
-          if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
-          abortRef.current = null;
+        } else {
+          // ── No explicit reschedule intent → explain the conflict ───────────
+          // Build the summary from the context data — no LLM, no accidental moves.
+          const fmtTime = (iso?: string) =>
+            iso ? new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "?";
+          const aTime = `${fmtTime(conflictContext.eventAStart)}–${fmtTime(conflictContext.eventAEnd)}`;
+          const bTime = `${fmtTime(conflictContext.eventBStart)}–${fmtTime(conflictContext.eventBEnd)}`;
+          const summary =
+            `**${conflictContext.eventATitle}** (${aTime}) overlaps with **${conflictContext.eventBTitle}** (${bTime}).\n\n` +
+            `To resolve it, tell me what to do — for example:\n` +
+            `• "Move ${conflictContext.eventATitle} to 3pm"\n` +
+            `• "Move ${conflictContext.eventBTitle} to 4pm"\n` +
+            `• "Delete ${conflictContext.eventBTitle}"`;
+          setMessages((prev) => [...prev, { role: "agent", text: summary, ts: new Date() }]);
           setIsLoading(false);
         }
         return;
@@ -1348,6 +1527,15 @@ export function ChatDrawer({
       let agentText = trimmed;
       if (docForChat?.text) {
         agentText = `[Document context — "${docForChat.filename}" — answer from this document only, do not search the web]\n${docForChat.text.slice(0, 1500)}\n\n---\n\n${trimmed}`;
+      }
+
+      // ── Weather context injection ──────────────────────────────────────────
+      // If the user asks a follow-up about outdoor plans and we already fetched
+      // a weather forecast this session, prepend it so the model can reason.
+      const WEATHER_FOLLOWUP_RE =
+        /\b(best|good|ideal|great)\b.{0,40}\b(day|time)\b.{0,60}\b(golf|run|jog|tennis|walk|hike|outdoor|outside|sport|picnic)\b/i;
+      if (WEATHER_FOLLOWUP_RE.test(trimmed) && lastWeatherRef.current) {
+        agentText = `[Weather forecast]\n${lastWeatherRef.current}\n\n---\n\n${agentText}`;
       }
 
       // ── Calendar context injection ─────────────────────────────────────────

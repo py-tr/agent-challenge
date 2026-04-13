@@ -245,6 +245,24 @@ export const pulseApi = {
       { method: "POST", body: JSON.stringify(params) }
     ),
 
+  getWeather: (message: string) =>
+    request<{ forecast: string; city: string }>(
+      `/pulse/weather`,
+      { method: "POST", body: JSON.stringify({ message }) }
+    ),
+
+  logCommitment: (text: string) =>
+    request<{ saved: boolean; deadline: string | null; reminderText: string }>(
+      `/pulse/log-commitment`,
+      { method: "POST", body: JSON.stringify({ text }) }
+    ),
+
+  rescheduleByTitle: (message: string) =>
+    request<{ success: boolean; text: string }>(
+      `/pulse/reschedule-by-title`,
+      { method: "POST", body: JSON.stringify({ message }) }
+    ),
+
   rescheduleEvent: (params: { eventId: string; newStart: string; newEnd: string; timeZone?: string }) =>
     request<{ success: boolean; eventId: string; title: string; newStart: string; label: string }>(
       `/pulse/reschedule-event`,

@@ -10,7 +10,11 @@ RUN apt-get update && apt-get install -y \
   git \
   curl \
   unzip \
+  ca-certificates \
   && rm -rf /var/lib/apt/lists/*
+
+# Install Ollama binary from official image (cleaner than install.sh — no systemd)
+COPY --from=ollama/ollama:latest /usr/bin/ollama /usr/local/bin/ollama
 
 # Install bun (required by elizaos CLI).
 # Copy the binary to /usr/local/bin with world-executable permissions so it
@@ -65,10 +69,19 @@ RUN ls -la /srv/pulse-frontend/
 RUN mkdir -p /app/data
 
 EXPOSE 3000
+# Ollama API port (internal — not exposed to outside)
+EXPOSE 11434
 
-# Health check — Nosana and orchestrators use this to detect crashes.
-# /pulse/status is lightweight (no DB or API calls) and always responds.
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+# Copy entrypoint script
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Store Ollama models outside /app to avoid Nosana volume mount conflicts
+ENV OLLAMA_MODELS=/var/ollama/models
+
+# Health check — /pulse/status is lightweight and always responds.
+# Start period is longer to account for Ollama startup + model pull on first boot.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=300s --retries=5 \
   CMD curl -f http://localhost:3000/pulse/status || exit 1
 
-CMD ["pnpm", "start"]
+ENTRYPOINT ["docker-entrypoint.sh"]

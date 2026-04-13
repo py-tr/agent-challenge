@@ -24,6 +24,7 @@ import { ModelType } from "@elizaos/core";
 import { CalendarMcpService } from "../services/CalendarMcpService.js";
 import { insertActionItem } from "../db/queries.js";
 import type { Db } from "../db/schema.js";
+import { useModelWithFallback } from "../lib/llmFallback.js";
 
 // ─── Intent detection ─────────────────────────────────────────────────────────
 
@@ -143,7 +144,7 @@ async function extractEventDetails(
 
   let raw: string;
   try {
-    raw = await runtime.useModel(ModelType.TEXT_SMALL, { prompt });
+    raw = await useModelWithFallback(runtime, ModelType.TEXT_SMALL, { prompt });
   } catch (err) {
     console.warn(
       "[CreateCalendarEventAction] LLM call failed:",
@@ -182,6 +183,27 @@ async function extractEventDetails(
     );
     return null;
   }
+}
+
+// ─── Conflict pre-check ───────────────────────────────────────────────────────
+
+/**
+ * Returns any existing events that overlap with [newStart, newEnd).
+ * All strings are naive ISO datetimes ("YYYY-MM-DDTHH:MM:SS") — compared
+ * lexicographically, which is valid for same-timezone strings.
+ */
+function findOverlappingEvents(
+  existingEvents: Array<{ title: string; start: string; end: string }>,
+  newStart: string,
+  newEnd: string
+): Array<{ title: string; start: string; end: string }> {
+  const sNew = new Date(newStart).getTime();
+  const eNew = new Date(newEnd).getTime();
+  return existingEvents.filter((ev) => {
+    const sEv = new Date(ev.start).getTime();
+    const eEv = new Date(ev.end).getTime();
+    return sEv < eNew && eEv > sNew;
+  });
 }
 
 /** Convert "YYYY-MM-DD" + "HH:MM" to a naive ISO 8601 datetime string. */
@@ -281,7 +303,7 @@ export const createCalendarEventAction: Action = {
       return { success: false, text: errText, error: "extraction_failed" };
     }
 
-    // ── 2. Create the event in Google Calendar ──────────────────────────────
+    // ── 2. Conflict pre-check ────────────────────────────────────────────────
     const calSvc = runtime.getService(
       CalendarMcpService.serviceType
     ) as CalendarMcpService | null;
@@ -295,6 +317,34 @@ export const createCalendarEventAction: Action = {
 
     const startIso = toIso(details.date, details.startTime);
     const endIso   = addMinutes(startIso, details.durationMinutes);
+
+    // Fetch events for that day and check for overlaps before creating.
+    // Skip check if the user explicitly overrides ("schedule anyway").
+    const isForced = /schedule\s+anyway|force\s+it|override|ignore\s+conflict/i.test(rawText);
+    if (!isForced) try {
+      const existingEvents = await calSvc.getEvents(14);
+      const overlapping = findOverlappingEvents(existingEvents, startIso, endIso);
+
+      if (overlapping.length > 0) {
+        const conflictList = overlapping
+          .map((ev) => `**${ev.title}** (${ev.start.slice(11, 16)}–${ev.end.slice(11, 16)})`)
+          .join(", ");
+
+        const warnText =
+          `⚠ You already have ${conflictList} at that time. ` +
+          `The event was **not** created. ` +
+          `Choose a different time or say "schedule anyway" to override.`;
+
+        await callback?.({ text: warnText });
+        return { success: false, text: warnText, error: "conflict" };
+      }
+    } catch (err) {
+      // Non-fatal — if we can't fetch existing events, proceed with creation.
+      console.warn(
+        "[CreateCalendarEventAction] Conflict pre-check failed (proceeding):",
+        err instanceof Error ? err.message : String(err)
+      );
+    }
 
     // Prefer LLM-detected timezone; fall back to the system's local timezone
     // (works correctly on the user's machine — avoids UTC shifting 1pm → 11am).

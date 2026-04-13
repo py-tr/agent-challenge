@@ -11,6 +11,7 @@
 
 import { ModelType } from "@elizaos/core";
 import type { IAgentRuntime } from "@elizaos/core";
+import { useModelWithFallback } from "./llmFallback.js";
 
 // ─── Public Types ─────────────────────────────────────────────────────────────
 
@@ -28,7 +29,8 @@ export interface ExtractedCommitment {
 // ─── Quick Pattern Check (used in Evaluator.validate) ────────────────────────
 
 // Anchored to first-person commitment starters
-const COMMITMENT_TRIGGER = /\b(?:I(?:'ll|'m going to| will| can have| should| am going to))\b.{0,120}\bby\b/i;
+// Handles both straight apostrophe (') and curly/smart apostrophe (')
+const COMMITMENT_TRIGGER = /\b(?:I(?:['']ll|['']m going to| will| can have| should| am going to))\b.{0,120}\bby\b/i;
 
 export function hasCommitmentPattern(text: string): boolean {
   return COMMITMENT_TRIGGER.test(text);
@@ -65,16 +67,26 @@ async function llmExtract(
   text: string
 ): Promise<ExtractedCommitment[]> {
   const today = TODAY_LABEL();
+  // Build an explicit weekday table so the LLM cannot miscalculate day-of-week.
+  const base = new Date();
+  const weekTable = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(base);
+    d.setDate(base.getDate() + i);
+    const name = d.toLocaleDateString("en-US", { weekday: "long" });
+    return `  ${name} = ${toYMD(d)}`;
+  }).join("\n");
+
   const prompt =
     `You extract commitment promises from messages. A commitment is when the author promises to do something by a specific date.\n` +
-    `Today is ${today}.\n\n` +
+    `Today is ${today} (${base.toLocaleDateString("en-US", { weekday: "long" })}).\n` +
+    `This week's dates (use these — do not calculate independently):\n${weekTable}\n\n` +
     `Message:\n"${text}"\n\n` +
     `If commitments exist, reply with a JSON array ONLY (no other text):\n` +
     `[{"text":"verbatim phrase","recipient":"name or null","deadline":"YYYY-MM-DD"}]\n` +
     `If no commitments, reply with: []\n` +
-    `Resolve relative dates (Monday, next Friday, tomorrow, end of week, etc.) against today (${today}).`;
+    `Use the date table above to resolve day names. "EOD Friday" = this Friday's date from the table.`;
 
-  const raw = await runtime.useModel(ModelType.TEXT_SMALL, {
+  const raw = await useModelWithFallback(runtime, ModelType.TEXT_SMALL, {
     prompt,
     maxTokens: 300,
     temperature: 0,

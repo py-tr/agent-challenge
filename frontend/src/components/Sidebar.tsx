@@ -224,23 +224,6 @@ export function Sidebar({ activeView, onNavigate, pendingCount, committedCount, 
                 </>
               )}
 
-              {nosana.tokensPerSec != null && (
-                <>
-                  <span className="text-[10px]" style={{ color: "#64748b" }}>Tokens/s</span>
-                  <span className="font-mono text-[10px] text-right" style={{ color: "#34d399" }}>
-                    {nosana.tokensPerSec}
-                  </span>
-                </>
-              )}
-
-              {nosana.estimatedCostUsd != null && nosana.estimatedCostUsd > 0 && (
-                <>
-                  <span className="text-[10px]" style={{ color: "#64748b" }}>Est. cost</span>
-                  <span className="font-mono text-[10px] text-right" style={{ color: "#94a3b8" }}>
-                    ${nosana.estimatedCostUsd.toFixed(4)}
-                  </span>
-                </>
-              )}
 
               <span className="text-[10px]" style={{ color: "#64748b" }}>Uptime</span>
               <span className="font-mono text-[10px] text-right" style={{ color: "#94a3b8" }}>

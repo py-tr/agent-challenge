@@ -352,6 +352,39 @@ export async function resolveFollowUpsWithReplies(
 }
 
 /**
+ * Auto-approve pending slib_reminder items whose deadline has passed by more
+ * than 24 hours — the commitment window is over, no action needed.
+ * Returns the number of items expired.
+ */
+export async function autoExpireSlibReminders(db: Db): Promise<number> {
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1_000).toISOString().slice(0, 10);
+
+  const rows = await db
+    .select({ id: actionItems.id, metadata: actionItems.metadata })
+    .from(actionItems)
+    .where(and(eq(actionItems.type, "slib_reminder"), eq(actionItems.status, "pending")));
+
+  const toExpire = rows.filter((r) => {
+    if (!r.metadata) return false;
+    try {
+      const meta = JSON.parse(r.metadata) as { deadline?: string };
+      return typeof meta.deadline === "string" && meta.deadline <= cutoff;
+    } catch {
+      return false;
+    }
+  }).map((r) => r.id);
+
+  if (toExpire.length === 0) return 0;
+
+  await db
+    .update(actionItems)
+    .set({ status: "approved", decidedAt: new Date().toISOString() })
+    .where(inArray(actionItems.id, toExpire));
+
+  return toExpire.length;
+}
+
+/**
  * Approval rate by action item type — used by the pattern summary
  * once 10+ decisions exist.
  *

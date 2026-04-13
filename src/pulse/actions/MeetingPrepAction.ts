@@ -23,6 +23,7 @@ import { ModelType } from "@elizaos/core";
 import { CalendarMcpService } from "../services/CalendarMcpService.js";
 import { searchMessages } from "../lib/gmailClient.js";
 import type { CalendarEvent } from "../lib/calendarClient.js";
+import { useModelWithFallback } from "../lib/llmFallback.js";
 
 // ─── Trigger detection ────────────────────────────────────────────────────────
 
@@ -203,7 +204,7 @@ Write a focused 5–8 bullet prep brief covering:
 
 Keep it tight — no fluff. The user reads this 5 minutes before the meeting.`;
 
-      const brief = await runtime.useModel(ModelType.TEXT_LARGE, { prompt });
+      const brief = await useModelWithFallback(runtime, ModelType.TEXT_LARGE, { prompt });
 
       const summary = event
         ? `Here's your prep brief for **${event.title}** (${formatEventTime(event.start, event.allDay)}):\n\n${brief}`

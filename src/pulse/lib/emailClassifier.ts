@@ -14,6 +14,7 @@ import { ModelType } from "@elizaos/core";
 import type { IAgentRuntime } from "@elizaos/core";
 import type { GmailMessage } from "./gmailClient.js";
 import type { ActionItemType } from "../types.js";
+import { useModelWithFallback } from "./llmFallback.js";
 
 /** Display name used in outgoing email signatures. Configurable via env. */
 const USER_DISPLAY_NAME =
@@ -137,7 +138,7 @@ Preview: ${safeSnippet}`;
 
   let raw = "";
   try {
-    raw = await runtime.useModel(ModelType.TEXT_SMALL, {
+    raw = await useModelWithFallback(runtime, ModelType.TEXT_SMALL, {
       prompt,
       maxTokens: 12,
       temperature: 0,
@@ -185,10 +186,9 @@ function parseCategory(raw: string): EmailCategory {
 }
 
 /**
- * Subject-based fallback that returns a full ClassificationResult directly,
- * bypassing the EmailCategory → ActionItemType mapping so it can produce
- * conflict_resolution items (which have no corresponding EmailCategory).
- * Called when the LLM is unavailable.
+ * Subject-based fallback used when the LLM is unavailable.
+ * Only produces email_draft / follow_up items — never conflict_resolution.
+ * Calendar conflicts come exclusively from the DetectConflicts pipeline.
  * Defaults to email_draft P4 rather than noise so no email is silently dropped.
  */
 function subjectFallback(msg: GmailMessage): ClassificationResult {
@@ -197,12 +197,9 @@ function subjectFallback(msg: GmailMessage): ClassificationResult {
   if (["reschedule", "meeting", "call"].some((k) => subject.includes(k))) {
     return {
       category: "action-required",
-      actionItemType: "conflict_resolution",
+      actionItemType: "email_draft",
       priority: 2,
-      body:
-        `**Subject:** ${msg.subject}\n` +
-        `**From:** ${msg.from}\n\n` +
-        `${msg.snippet}`,
+      body: buildReplyDraft(msg),
       metadata: { from: msg.from, messageId: msg.id },
     };
   }

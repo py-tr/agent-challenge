@@ -105,3 +105,5 @@ scripts/seed-gmail.ts
 # Nosana confidential job definitions — contain Google OAuth credentials, never commit
 nos_job_def/*_confidential.json
 pulse-auth.json
+# Demo script
+SCRIPT.md

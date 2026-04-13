@@ -38,9 +38,11 @@ import {
   getPendingReminders,
   markReminderSent,
   countByStatus,
+  autoExpireSlibReminders,
 } from "../db/queries.js";
 import { actionItems, type Db } from "../db/schema.js";
 import { seedDemoData } from "../lib/seedDemoData.js";
+import { runMigrations } from "../db/migrations.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -200,7 +202,21 @@ export class PulseBackgroundService extends Service {
       `Task ID: ${this.taskId} · Cycle every ${CYCLE_INTERVAL_MS / 3_600_000}h`
     );
 
-    // 3. Auto-seed demo data when requested OR when no Google credentials are
+    // 3. Ensure migrations are complete before any DB access.
+    //    Services start in parallel — GmailMcpService also runs migrations but
+    //    may not have finished by the time Cycle #1 fires. Running here is safe
+    //    because runMigrations() is idempotent (IF NOT EXISTS / version check).
+    try {
+      const db = this.runtime.db as unknown as Db;
+      await runMigrations(db);
+    } catch (err) {
+      console.warn(
+        "[Pulse] Migration guard failed (non-fatal):",
+        err instanceof Error ? err.message : String(err)
+      );
+    }
+
+    // 4. Auto-seed demo data when requested OR when no Google credentials are
     //    configured (so the dashboard is never empty on first launch).
     //    Runs before the first processing cycle so the dashboard is populated
     //    immediately on Nosana deployments without manual intervention.
@@ -465,7 +481,14 @@ export class PulseBackgroundService extends Service {
 
   private async stageReminders(): Promise<StageResult> {
     try {
-      const db  = this.runtime.db as unknown as Db;
+      const db = this.runtime.db as unknown as Db;
+
+      // Auto-expire slib_reminder cards whose deadline passed >24h ago.
+      const expired = await autoExpireSlibReminders(db);
+      if (expired > 0) {
+        console.log(`[Pulse:Reminders] Auto-expired ${expired} past-deadline reminder(s).`);
+      }
+
       const due = await getPendingReminders(db);
 
       if (due.length === 0) {
