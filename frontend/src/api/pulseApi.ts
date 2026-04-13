@@ -221,6 +221,11 @@ export const pulseApi = {
 
   getBriefing: () => request<BriefingResponse>("/pulse/briefing"),
 
+  getCalendarContext: () =>
+    request<{ context: string; events: Array<{ id: string; title: string; start: string; end: string; allDay: boolean; attendees: string[] }> }>(
+      "/pulse/calendar-context"
+    ),
+
   findFreeSlots: (params: { date: string; durationMinutes: number; excludeEventIds?: string[] }) =>
     request<{ slots: Array<{ start: string; end: string; label: string }> }>(
       `/pulse/find-free-slots`,

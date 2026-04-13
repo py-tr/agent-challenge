@@ -740,6 +740,62 @@ export const pulseRoutes: Route[] = [
     },
   },
 
+  // ── GET /pulse/calendar-context ───────────────────────────────────────────
+  // Returns a plain-text summary of calendar events for the next 7 days.
+  // Used by ChatDrawer to inject real event data before sending calendar
+  // questions to the ElizaOS agent, preventing hallucinated responses.
+  {
+    type: "GET",
+    path: "/calendar-context",
+    public: true,
+    name: "Pulse Calendar Context",
+    handler: async (_req: RouteRequest, res: RouteResponse, _runtime: IAgentRuntime) => {
+      try {
+        const result = await listEvents(7);
+
+        if (result.error || result.events.length === 0) {
+          ok(res, { context: "No calendar events found for the next 7 days.", events: [] });
+          return;
+        }
+
+        // Format events as a compact human-readable block for LLM context injection.
+        const now = new Date();
+        const lines: string[] = [`Your calendar — next 7 days (as of ${now.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}):`, ""];
+
+        // Group by date
+        const byDay = new Map<string, typeof result.events>();
+        for (const ev of result.events) {
+          const day = ev.start.slice(0, 10);
+          if (!byDay.has(day)) byDay.set(day, []);
+          byDay.get(day)!.push(ev);
+        }
+
+        for (const [day, events] of byDay) {
+          const label = new Date(day + "T12:00:00").toLocaleDateString("en-US", {
+            weekday: "short", month: "short", day: "numeric",
+          });
+          lines.push(`${label}:`);
+          for (const ev of events) {
+            const time = ev.allDay
+              ? "all-day"
+              : `${ev.start.slice(11, 16)}–${ev.end.slice(11, 16)}`;
+            const who = ev.attendees.length > 0
+              ? ` [${ev.attendees.slice(0, 3).join(", ")}${ev.attendees.length > 3 ? ` +${ev.attendees.length - 3}` : ""}]`
+              : "";
+            lines.push(`  • ${time} — ${ev.title}${who}`);
+          }
+          lines.push("");
+        }
+
+        ok(res, { context: lines.join("\n"), events: result.events });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[Pulse:Routes] GET /pulse/calendar-context: ${msg}`);
+        ok(res, { context: "Calendar unavailable — Google Calendar not connected.", events: [] });
+      }
+    },
+  },
+
   // ── POST /pulse/dismiss/:id ───────────────────────────────────────────────
   // Skip an email_draft without rejecting it as "bad". Records decision as
   // rejected with reason "skipped" — semantically: "I'll handle this elsewhere."

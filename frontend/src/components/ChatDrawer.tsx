@@ -1350,6 +1350,21 @@ export function ChatDrawer({
         agentText = `[Document context — "${docForChat.filename}" — answer from this document only, do not search the web]\n${docForChat.text.slice(0, 1500)}\n\n---\n\n${trimmed}`;
       }
 
+      // ── Calendar context injection ─────────────────────────────────────────
+      // When the user asks about their schedule, meetings, or events, fetch
+      // real calendar data and prepend it so the agent never hallucinates.
+      const CALENDAR_RE = /\b(meeting|event|calendar|schedule|appointment|stand.?up|call|planned|next\s+meeting|next\s+event|do i have|what.*\d{1,2}[:.]\d{2}|at\s+\d{1,2}(:\d{2})?\s*(am|pm)?|prep(are)?.*meeting|prepare me)\b/i;
+      if (CALENDAR_RE.test(trimmed) && !docForChat) {
+        try {
+          const cal = await pulseApi.getCalendarContext();
+          if (cal.context && cal.events.length > 0) {
+            agentText = `[${cal.context}]\n\n${agentText}`;
+          }
+        } catch {
+          // Calendar fetch failed — continue without context
+        }
+      }
+
       // ── Web search guard ───────────────────────────────────────────────────
       // Deterministic code-level check: only allow WEB_SEARCH when the user
       // explicitly signals they want it. Appending this instruction is more
