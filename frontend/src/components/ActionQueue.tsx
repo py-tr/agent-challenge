@@ -22,7 +22,7 @@ interface Props {
 // ─── Type metadata ────────────────────────────────────────────────────────────
 
 const TYPE_META: Record<
-  Exclude<ActionItemType, "follow_up">,
+  ActionItemType,
   { label: string; cta: string; borderColor: string; badgeClass: string; filterLabel: string }
 > = {
   email_draft: {
@@ -40,15 +40,22 @@ const TYPE_META: Record<
     filterLabel: "Conflict",
   },
   slib_reminder: {
-    label: "Commitment",
+    label: "Commitment Reminder",
     cta: "Commitment reminder — approve to confirm handled",
     borderColor: "#f59e0b",
     badgeClass: "bg-amber-50 text-amber-700 ring-1 ring-amber-200/60",
     filterLabel: "Commitment",
   },
+  follow_up: {
+    label: "Follow-up",
+    cta: "No reply detected — send a follow-up nudge?",
+    borderColor: "#8b5cf6",
+    badgeClass: "bg-violet-50 text-violet-700 ring-1 ring-violet-200/60",
+    filterLabel: "Follow-up",
+  },
 };
 
-type FilterType = Exclude<ActionItemType, "follow_up"> | "all";
+type FilterType = ActionItemType | "all";
 
 // ─── Filter pills ─────────────────────────────────────────────────────────────
 
@@ -61,7 +68,7 @@ function FilterPills({
   active: FilterType;
   onChange: (f: FilterType) => void;
 }) {
-  const types = (Object.keys(TYPE_META) as Array<Exclude<ActionItemType, "follow_up">>).filter((t) =>
+  const types = (Object.keys(TYPE_META) as ActionItemType[]).filter((t) =>
     items.some((i) => i.type === t)
   );
 
@@ -166,7 +173,7 @@ function UndoCard({
   undoEntry: UndoEntry;
   onUndo: () => void;
 }) {
-  const meta = TYPE_META[item.type as Exclude<ActionItemType, "follow_up">] ?? TYPE_META.email_draft;
+  const meta = TYPE_META[item.type] ?? TYPE_META.email_draft;
   // Compute remaining time at mount so the CSS animation starts from the correct position
   const [remaining] = useState(() =>
     Math.max(0, UNDO_DELAY_MS - (Date.now() - undoEntry.startedAt))
@@ -529,14 +536,59 @@ function ItemCard({
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [flash, setFlash] = useState<FlashState>("idle");
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
   const animTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const meta = TYPE_META[item.type as Exclude<ActionItemType, "follow_up">] ?? TYPE_META.email_draft;
+  const meta = TYPE_META[item.type] ?? TYPE_META.email_draft;
 
   // Detect if this draft was auto-created from a conflict resolution
   const sourceConflictTitle =
     item.type === "email_draft"
       ? (item.metadata?.sourceConflictTitle as string | undefined)
       : undefined;
+
+  // Auto-fetch AI summary for email_draft items.
+  // Strip agent-generated text (reply scaffold, action prompts) — only keep the
+  // original sender's message so the LLM summarizes the actual email, not the draft.
+  useEffect(() => {
+    if (item.type !== "email_draft") return;
+    const subject = typeof item.metadata?.subject === "string" ? item.metadata.subject : item.title;
+    const from = typeof item.metadata?.from === "string" ? item.metadata.from : "";
+
+    // Extract only the original message from the structured body.
+    // Body format: **From:**\n**Subject:**\n---\n**Their message:**\n<original>\n---\n**Suggested reply scaffold:**...
+    const ORIGINAL_MARKER = "**Their message:**\n";
+    const SCAFFOLD_MARKER = "**Suggested reply scaffold:**";
+    const APPROVE_MARKER  = "**Approve**";
+    let bodyForSummary = item.body;
+    const origStart = bodyForSummary.indexOf(ORIGINAL_MARKER);
+    if (origStart !== -1) {
+      const textStart = origStart + ORIGINAL_MARKER.length;
+      const endA = bodyForSummary.indexOf("\n---\n", textStart);
+      const endB = bodyForSummary.indexOf(SCAFFOLD_MARKER, textStart);
+      const endC = bodyForSummary.indexOf(APPROVE_MARKER, textStart);
+      const stop = Math.min(
+        endA !== -1 ? endA : Infinity,
+        endB !== -1 ? endB : Infinity,
+        endC !== -1 ? endC : Infinity,
+      );
+      bodyForSummary = stop !== Infinity
+        ? bodyForSummary.slice(textStart, stop).trim()
+        : bodyForSummary.slice(textStart).trim();
+    }
+    // Fallback: strip everything after the first "---" separator
+    if (!bodyForSummary || bodyForSummary === item.body) {
+      const sepIdx = item.body.indexOf("\n---\n");
+      if (sepIdx !== -1) bodyForSummary = item.body.slice(0, sepIdx).trim();
+    }
+    // If still nothing useful, use the snippet (first non-empty line)
+    if (!bodyForSummary || bodyForSummary.length < 10) {
+      bodyForSummary = item.body.split("\n").find((l) => l.trim().length > 10) ?? item.body;
+    }
+
+    pulseApi.summarizeEmail({ subject, from, body: bodyForSummary.slice(0, 500) })
+      .then((r) => setAiSummary(r.summary))
+      .catch(() => {}); // silent — summary is a nice-to-have
+  }, [item.id, item.type]);
 
   useEffect(() => {
     return () => {
@@ -632,6 +684,14 @@ function ItemCard({
         <p className="mt-1 text-xs font-medium" style={{ color: meta.borderColor }}>
           {meta.cta}
         </p>
+
+        {/* AI summary chip — email_draft only */}
+        {aiSummary && (
+          <div className="mt-2 flex items-start gap-1.5 rounded-md bg-indigo-50 px-2.5 py-1.5">
+            <span className="mt-0.5 shrink-0 text-[10px] font-bold text-indigo-400 uppercase tracking-wide">AI</span>
+            <p className="text-xs leading-relaxed text-indigo-700">{aiSummary}</p>
+          </div>
+        )}
 
         {expanded ? (
           <div className="mt-3">
@@ -929,7 +989,7 @@ export function ActionQueue({ items, loading, onApprove, onReject, onDismiss, on
 
         {filtered.length === 0 && filter !== "all" && (
           <p className="py-6 text-center text-sm text-gray-400">
-            No {TYPE_META[filter as Exclude<ActionItemType, "follow_up">]?.filterLabel.toLowerCase()} items pending
+            No {TYPE_META[filter as ActionItemType]?.filterLabel.toLowerCase()} items pending
           </p>
         )}
       </div>

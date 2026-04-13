@@ -159,28 +159,40 @@ export class PulseBackgroundService extends Service {
     });
 
     // 2. Create (or reuse) a persistent task record in the runtime DB.
-    //    getTasksByName lets us avoid duplicates on service restart.
-    const existing = await this.runtime.getTasksByName(TASK_NAME).catch(() => []);
-    if (existing.length > 0) {
-      this.taskId = existing[0].id as UUID;
-      await this.runtime.updateTask(this.taskId, {
-        metadata: {
-          updateInterval: CYCLE_INTERVAL_MS,
-          jobType: process.env.PULSE_JOB_TYPE ?? "scheduled",
-          restartedAt: new Date().toISOString(),
-        },
-      }).catch(() => null);
-    } else {
-      this.taskId = await this.runtime.createTask({
-        name: TASK_NAME,
-        description: "Pulse 6-hour processing: Gmail → classify → queue, Calendar → conflicts, Commitments → reminders",
-        tags: ["pulse", "scheduled", "recurring"],
-        metadata: {
-          updateInterval: CYCLE_INTERVAL_MS,
-          jobType: process.env.PULSE_JOB_TYPE ?? "scheduled",
-          createdAt: new Date().toISOString(),
-        },
-      });
+    //    ElizaOS 1.7.2+ requires a worldId on createTask — we use agentId as
+    //    the world identifier (safe fallback when no explicit world is set).
+    //    Task registration is non-fatal: the setInterval below drives the actual
+    //    processing cycle regardless of whether the task record is persisted.
+    try {
+      const existing = await this.runtime.getTasksByName(TASK_NAME).catch(() => []);
+      if (existing.length > 0) {
+        this.taskId = existing[0].id as UUID;
+        await this.runtime.updateTask(this.taskId, {
+          metadata: {
+            updateInterval: CYCLE_INTERVAL_MS,
+            jobType: process.env.PULSE_JOB_TYPE ?? "scheduled",
+            restartedAt: new Date().toISOString(),
+          },
+        }).catch(() => null);
+      } else {
+        this.taskId = await this.runtime.createTask({
+          name: TASK_NAME,
+          description: "Pulse 6-hour processing: Gmail → classify → queue, Calendar → conflicts, Commitments → reminders",
+          tags: ["pulse", "scheduled", "recurring"],
+          worldId: this.runtime.agentId as UUID,
+          metadata: {
+            updateInterval: CYCLE_INTERVAL_MS,
+            jobType: process.env.PULSE_JOB_TYPE ?? "scheduled",
+            createdAt: new Date().toISOString(),
+          },
+        });
+      }
+    } catch (e) {
+      console.warn(
+        "[Pulse] Task record registration skipped (non-fatal):",
+        e instanceof Error ? e.message : String(e)
+      );
+      this.taskId = crypto.randomUUID() as UUID;
     }
 
     console.log(

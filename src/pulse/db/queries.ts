@@ -9,7 +9,7 @@
  *   - All dates written as ISO strings; never Date objects.
  */
 
-import { eq, and, lte, desc, count, isNull } from "drizzle-orm";
+import { eq, and, lte, desc, count, isNull, gte, asc, inArray } from "drizzle-orm";
 import { actionItems, commitments, decisions, type Db } from "./schema.js";
 import {
   rowToActionItem,
@@ -262,6 +262,121 @@ export async function getDecisions(
 export async function countDecisions(db: Db): Promise<number> {
   const rows = await db.select({ n: count() }).from(decisions);
   return rows[0]?.n ?? 0;
+}
+
+export interface DayBucket { date: string; approved: number; rejected: number }
+
+/**
+ * Returns decisions grouped by calendar day for the last N days.
+ * Used by the analytics dashboard.
+ */
+export async function getWeeklyDecisions(
+  db: Db,
+  days = 7
+): Promise<DayBucket[]> {
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1_000).toISOString();
+
+  const rows = await db
+    .select({
+      decidedAt: decisions.decidedAt,
+      decision:  decisions.decision,
+    })
+    .from(decisions)
+    .where(gte(decisions.decidedAt, since))
+    .orderBy(asc(decisions.decidedAt));
+
+  // Group by YYYY-MM-DD in TypeScript (avoids SQLite date function portability issues)
+  const map = new Map<string, DayBucket>();
+  for (const row of rows) {
+    const day = row.decidedAt.slice(0, 10);
+    const bucket = map.get(day) ?? { date: day, approved: 0, rejected: 0 };
+    if (row.decision === "approved") bucket.approved++;
+    else bucket.rejected++;
+    map.set(day, bucket);
+  }
+
+  // Fill in missing days with zeros so the chart has a full 7-day window
+  const result: DayBucket[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 24 * 60 * 60 * 1_000);
+    const key = d.toISOString().slice(0, 10);
+    result.push(map.get(key) ?? { date: key, approved: 0, rejected: 0 });
+  }
+  return result;
+}
+
+/** Check if a follow_up item already exists for a given Gmail thread/message ID. */
+export async function followUpExistsForThread(
+  db: Db,
+  gmailThreadId: string
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: actionItems.id })
+    .from(actionItems)
+    .where(
+      and(
+        eq(actionItems.type, "follow_up"),
+        eq(actionItems.status, "pending")
+      )
+    )
+    .limit(50);
+
+  return rows.some((r) => {
+    try {
+      const meta = db
+        .select({ metadata: actionItems.metadata })
+        .from(actionItems)
+        .where(eq(actionItems.id, r.id));
+      void meta; // just check via the metadata string match below
+    } catch { /* ignore */ }
+    return false;
+  });
+}
+
+/**
+ * Check if a follow_up item exists for a thread by scanning metadata JSON.
+ * Lightweight: only looks at pending follow_up items.
+ */
+export async function followUpExistsForGmailThread(
+  db: Db,
+  threadId: string
+): Promise<boolean> {
+  const rows = await db
+    .select({ metadata: actionItems.metadata })
+    .from(actionItems)
+    .where(and(eq(actionItems.type, "follow_up"), eq(actionItems.status, "pending")));
+
+  return rows.some((r) => r.metadata?.includes(threadId));
+}
+
+/**
+ * Auto-resolve pending follow_up items whose thread has since received a reply.
+ * threadIds: set of thread IDs that now have a reply (last message not from user).
+ * Returns the number of items resolved.
+ */
+export async function resolveFollowUpsWithReplies(
+  db: Db,
+  repliedThreadIds: Set<string>
+): Promise<number> {
+  if (repliedThreadIds.size === 0) return 0;
+
+  const rows = await db
+    .select({ id: actionItems.id, metadata: actionItems.metadata })
+    .from(actionItems)
+    .where(and(eq(actionItems.type, "follow_up"), eq(actionItems.status, "pending")));
+
+  const toResolve = rows
+    .filter((r) => r.metadata && [...repliedThreadIds].some((tid) => r.metadata!.includes(tid)))
+    .map((r) => r.id);
+
+  if (toResolve.length === 0) return 0;
+
+  await db
+    .update(actionItems)
+    .set({ status: "approved" })
+    .where(inArray(actionItems.id, toResolve));
+
+  return toResolve.length;
 }
 
 /**

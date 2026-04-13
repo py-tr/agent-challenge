@@ -56,7 +56,8 @@ export async function refreshAccessToken(): Promise<string> {
 
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+  const { resolveRefreshToken } = await import("./authStore.js");
+  const refreshToken = await resolveRefreshToken();
 
   if (!clientId || !clientSecret || !refreshToken) {
     throw new Error(
@@ -378,6 +379,120 @@ export async function sendEmail(
 
   const data = (await resp.json()) as { id: string };
   return data.id;
+}
+
+// ─── Sent messages + thread reply check ──────────────────────────────────────
+
+export interface SentMessage extends GmailMessage {
+  threadId: string;
+}
+
+/**
+ * Fetch recent messages from the SENT label.
+ * Used by DetectFollowUpsAction to find unanswered outbound emails.
+ */
+export async function listSentMessages(maxResults = 20): Promise<SentMessage[]> {
+  const token = await refreshAccessToken();
+
+  const listResp = await fetch(
+    `${GMAIL_BASE}/messages?maxResults=${maxResults}&labelIds=SENT`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!listResp.ok) throw new Error(`Gmail SENT list HTTP ${listResp.status}`);
+
+  const listData = (await listResp.json()) as { messages?: Array<{ id: string }> };
+  const ids = listData.messages ?? [];
+  if (ids.length === 0) return [];
+
+  const results = await Promise.allSettled(
+    ids.map(async ({ id }) => {
+      const resp = await fetch(
+        `${GMAIL_BASE}/messages/${id}?format=metadata` +
+        `&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date&metadataHeaders=To`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!resp.ok) throw new Error(`Sent message ${id} HTTP ${resp.status}`);
+
+      const msg = (await resp.json()) as {
+        id: string;
+        threadId: string;
+        snippet: string;
+        payload: { headers: Array<{ name: string; value: string }> };
+      };
+
+      const h = (name: string) =>
+        msg.payload.headers.find((hdr) => hdr.name.toLowerCase() === name.toLowerCase())?.value ?? "";
+
+      return {
+        id:       msg.id,
+        threadId: msg.threadId,
+        subject:  h("Subject") || "(no subject)",
+        from:     h("From"),
+        date:     h("Date"),
+        snippet:  msg.snippet,
+      } satisfies SentMessage;
+    })
+  );
+
+  return results
+    .filter((r): r is PromiseFulfilledResult<SentMessage> => r.status === "fulfilled")
+    .map((r) => r.value);
+}
+
+/**
+ * Get the number of messages in a thread and the sender of the most recent one.
+ * If messageCount > 1 and lastSender is NOT the user, a reply has been received.
+ */
+export async function getThreadInfo(
+  threadId: string
+): Promise<{ messageCount: number; lastMessageFrom: string }> {
+  const token = await refreshAccessToken();
+
+  const resp = await fetch(
+    `${GMAIL_BASE}/threads/${threadId}?format=metadata&metadataHeaders=From`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!resp.ok) throw new Error(`Thread ${threadId} HTTP ${resp.status}`);
+
+  const data = (await resp.json()) as {
+    messages: Array<{
+      payload: { headers: Array<{ name: string; value: string }> };
+    }>;
+  };
+
+  const messages = data.messages ?? [];
+  const lastMsg = messages[messages.length - 1];
+  const lastFrom = lastMsg?.payload.headers
+    .find((h) => h.name.toLowerCase() === "from")?.value ?? "";
+
+  return { messageCount: messages.length, lastMessageFrom: lastFrom };
+}
+
+/**
+ * Search Gmail messages using a query string (same syntax as the Gmail search box).
+ * Examples: "from:sarah@example.com", "subject:Q2 review", "Sarah meeting"
+ */
+export async function searchMessages(
+  query: string,
+  maxResults = 10
+): Promise<GmailMessage[]> {
+  const token = await refreshAccessToken();
+
+  const params = new URLSearchParams({
+    q: query,
+    maxResults: String(maxResults),
+  });
+
+  const listResp = await fetch(`${GMAIL_BASE}/messages?${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!listResp.ok) throw new Error(`Gmail search HTTP ${listResp.status}`);
+
+  const listData = (await listResp.json()) as { messages?: Array<{ id: string }> };
+  const ids = listData.messages ?? [];
+  if (ids.length === 0) return [];
+
+  return fetchMessageMetadata(token, ids.map((m) => m.id));
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────

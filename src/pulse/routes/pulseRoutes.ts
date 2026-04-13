@@ -27,7 +27,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve, extname, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MemoryType, ModelType, type Route, type RouteRequest, type RouteResponse, type IAgentRuntime } from "@elizaos/core";
+import { PDFParse } from "pdf-parse";
 import { getMetrics } from "../lib/nosanaMetrics.js";
+import { saveRefreshToken, isGoogleAuthConfigured } from "../lib/authStore.js";
 import {
   getQueue,
   getActionItem,
@@ -39,6 +41,7 @@ import {
   countDecisions,
   getDecisionPatterns,
   getCommitmentStats,
+  getWeeklyDecisions,
 } from "../db/queries.js";
 import type { Db } from "../db/schema.js";
 import type { ActionItem } from "../types.js";
@@ -52,6 +55,12 @@ const USER_DISPLAY_NAME =
   process.env.USER_NAME?.trim() ||
   process.env.USER_DISPLAY_NAME?.trim() ||
   "Pulse User";
+
+// ─── In-memory document store ────────────────────────────────────────────────
+// Uploaded PDFs are stored for the lifetime of the server process.
+// docId → { filename, text (first 8000 chars), pageCount, summary }
+interface DocEntry { filename: string; text: string; pageCount: number; summary: string }
+const docStore = new Map<string, DocEntry>();
 
 // ─── Frontend static-file serving ────────────────────────────────────────────
 
@@ -465,6 +474,66 @@ export const pulseRoutes: Route[] = [
     },
   },
 
+  // ── POST /pulse/summarize-email ───────────────────────────────────────────
+  // Lightweight LLM call: summarize an email body in 1-2 sentences.
+  // Used by the frontend to show a quick-read chip on email_draft cards.
+  {
+    type: "POST",
+    path: "/summarize-email",
+    handler: async (
+      req: RouteRequest,
+      res: RouteResponse,
+      runtime: IAgentRuntime
+    ) => {
+      try {
+        const { subject, from, body } = req.body as {
+          subject?: string;
+          from?: string;
+          body?: string;
+        };
+
+        if (!body) { err(res, "body is required", 400); return; }
+
+        const prompt =
+          `Summarize this email in 1-2 plain sentences (max 30 words). ` +
+          `Focus on what the sender wants or needs. No preamble.\n\n` +
+          `From: ${from ?? "unknown"}\n` +
+          `Subject: ${subject ?? "(no subject)"}\n\n` +
+          `${body.slice(0, 1200)}`;
+
+        const summary = await runtime.useModel(ModelType.TEXT_SMALL, { prompt });
+        ok(res, { summary: summary.trim() });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        err(res, msg);
+      }
+    },
+  },
+
+  // ── GET /pulse/analytics ──────────────────────────────────────────────────
+  {
+    type: "GET",
+    path: "/analytics",
+    handler: async (
+      _req: RouteRequest,
+      res: RouteResponse,
+      runtime: IAgentRuntime
+    ) => {
+      try {
+        const db = runtime.db as unknown as Db;
+        const [weekly, patterns] = await Promise.all([
+          getWeeklyDecisions(db, 7),
+          getDecisionPatterns(db),
+        ]);
+        ok(res, { weekly, patterns });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[Pulse:Routes] GET /pulse/analytics: ${msg}`);
+        err(res, msg);
+      }
+    },
+  },
+
   // ── GET /pulse/status ─────────────────────────────────────────────────────
   {
     type: "GET",
@@ -787,6 +856,86 @@ export const pulseRoutes: Route[] = [
         const msg = e instanceof Error ? e.message : String(e);
         console.error(`[Pulse:Routes] POST /pulse/draft-assist: ${msg}`);
         err(res, msg);
+      }
+    },
+  },
+
+  // ── POST /pulse/classify-intent ──────────────────────────────────────────
+  // Lightweight intent classifier. Returns structured JSON so the frontend can
+  // route to the right handler without regex. Bypasses ElizaOS sessions entirely.
+  // Intents: "doc_email" | "general"
+  {
+    type: "POST" as const,
+    path: "/classify-intent",
+    handler: async (req: RouteRequest, res: RouteResponse, runtime: IAgentRuntime) => {
+      try {
+        const {
+          message = "",
+          hasDoc = false,
+          docFilename = "",
+        } = (req.body as { message?: string; hasDoc?: boolean; docFilename?: string }) ?? {};
+
+        if (!message.trim()) {
+          ok(res, { intent: "general", params: {} });
+          return;
+        }
+
+        const docContext = hasDoc
+          ? `The user has a document attached: "${docFilename}".`
+          : "No document is attached.";
+
+        const prompt = [
+          "You are an intent classifier. Reply with a single line of JSON only — no markdown, no explanation.",
+          "",
+          docContext,
+          `User message: "${message.slice(0, 300)}"`,
+          "",
+          "Classify the intent into exactly one of these:",
+          '- "doc_email": user wants to email the document (or its summary/content) to someone.',
+          '  If an email address is present, include it as "to". Otherwise "to" is null.',
+          '- "general": anything else (questions, commands, greetings, etc).',
+          "",
+          'Reply format (one line, valid JSON):',
+          '{"intent":"doc_email","to":"someone@example.com"}',
+          'or {"intent":"doc_email","to":null}',
+          'or {"intent":"general"}',
+        ].join("\n");
+
+        const raw = await Promise.race([
+          runtime.useModel(ModelType.TEXT_SMALL, {
+            prompt,
+            maxTokens: 40,
+            temperature: 0,
+          }) as Promise<string>,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("classifier timeout")), 15_000)
+          ),
+        ]);
+
+        // Extract JSON from the response — model may add extra whitespace or quotes
+        const jsonMatch = (raw as string).match(/\{[^}]+\}/);
+        if (!jsonMatch) {
+          ok(res, { intent: "general", params: {} });
+          return;
+        }
+
+        let parsed: { intent?: string; to?: string | null };
+        try {
+          parsed = JSON.parse(jsonMatch[0]) as { intent?: string; to?: string | null };
+        } catch {
+          ok(res, { intent: "general", params: {} });
+          return;
+        }
+
+        const intent = parsed.intent === "doc_email" ? "doc_email" : "general";
+        const params: { to?: string } = {};
+        if (intent === "doc_email" && parsed.to) params.to = parsed.to;
+
+        ok(res, { intent, params });
+      } catch (e) {
+        // On any error, fall back to general so the chat still works
+        console.error(`[Pulse:Routes] POST /pulse/classify-intent: ${e instanceof Error ? e.message : e}`);
+        ok(res, { intent: "general", params: {} });
       }
     },
   },
@@ -1182,7 +1331,305 @@ export const pulseRoutes: Route[] = [
       }
     },
   },
+
+  // ── POST /pulse/send-direct ──────────────────────────────────────────────
+  // Send an email without requiring an existing action item in the queue.
+  // Used for document-summary emails drafted inline from chat.
+  // Body: { to: string, subject: string, body: string }
+  {
+    type: "POST" as const,
+    path: "/send-direct",
+    handler: async (req: RouteRequest, res: RouteResponse, runtime: IAgentRuntime) => {
+      try {
+        const { to, subject, body: emailBody } =
+          (req.body as { to?: string; subject?: string; body?: string }) ?? {};
+
+        if (!to?.trim() || !subject?.trim() || !emailBody?.trim()) {
+          err(res, "to, subject, and body are required", 400);
+          return;
+        }
+
+        const gmailSvc = runtime.getService(
+          GmailMcpService.serviceType
+        ) as GmailMcpService | null;
+
+        if (!gmailSvc) {
+          err(res, "GmailMcpService not available", 503);
+          return;
+        }
+
+        const messageId = await gmailSvc.sendEmail(to.trim(), subject.trim(), emailBody.trim());
+        console.log(`[Pulse:Routes] send-direct → ${to}, messageId=${messageId}`);
+        ok(res, { success: true, messageId });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[Pulse:Routes] POST /pulse/send-direct: ${msg}`);
+        err(res, msg);
+      }
+    },
+  },
+
+  // ── POST /pulse/upload ────────────────────────────────────────────────────
+  // Accept a base64-encoded PDF, extract text with pdf-parse, summarize with
+  // the LLM, store in the in-memory docStore, and return a docId the frontend
+  // can attach to subsequent chat messages for document-grounded Q&A.
+  //
+  // Body: { filename: string, data: string (base64 PDF) }
+  // Response: { docId, filename, summary, pageCount }
+  {
+    type: "POST" as const,
+    path: "/upload",
+    handler: async (req: RouteRequest, res: RouteResponse, runtime: IAgentRuntime) => {
+      try {
+        const { filename = "document.pdf", data } =
+          (req.body as { filename?: string; data?: string }) ?? {};
+
+        if (!data) { err(res, "data (base64 PDF) is required", 400); return; }
+
+        // Decode base64 → Buffer
+        let buf: Buffer;
+        try {
+          buf = Buffer.from(data, "base64");
+        } catch {
+          err(res, "Invalid base64 data", 400);
+          return;
+        }
+
+        if (buf.length === 0) { err(res, "Empty file", 400); return; }
+
+        // Parse PDF — extract raw text and page count
+        let pdfText = "";
+        let pageCount = 0;
+        try {
+          const parser = new PDFParse({ data: buf });
+          const parsed = await parser.getText();
+          pdfText   = parsed.text ?? "";
+          pageCount = parsed.total ?? 0;
+          await parser.destroy();
+        } catch (parseErr) {
+          const parseMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+          console.warn("[Pulse:Routes] pdf-parse failed:", parseMsg);
+          err(res, `Could not parse PDF: ${parseMsg}`, 422);
+          return;
+        }
+
+        if (!pdfText.trim()) {
+          err(res, "PDF contains no extractable text (may be a scanned image)", 422);
+          return;
+        }
+
+        // Truncate to first 6000 chars for LLM context (keeps well within small model limits)
+        const textForLlm   = pdfText.slice(0, 6_000);
+        const textForStore = pdfText.slice(0, 8_000);
+
+        // Single LLM call: produce a short summary AND a structured analysis.
+        // Bypasses ElizaOS sessions entirely — same pattern as /pulse/draft-assist.
+        const analysisPrompt =
+          `You are a document analyst. Analyze the following document and respond in this exact format:\n\n` +
+          `SUMMARY: <1-2 sentences describing what the document is>\n\n` +
+          `ACTION ITEMS:\n` +
+          `<bullet list of specific tasks, decisions, or approvals needed — with owner and deadline if present>\n\n` +
+          `DEADLINES:\n` +
+          `<bullet list of dates and what is due — or "None found" if absent>\n\n` +
+          `RISKS OR BLOCKERS:\n` +
+          `<bullet list of risks or blockers — or "None identified">\n\n` +
+          `Document: "${filename}" (${pageCount} pages)\n\n${textForLlm}`;
+
+        let summary  = `Document uploaded: ${filename} (${pageCount} pages).`;
+        let analysis = summary;
+        try {
+          const raw = await Promise.race([
+            runtime.useModel(ModelType.TEXT_SMALL, {
+              prompt: analysisPrompt,
+              maxTokens: 600,
+              temperature: 0.2,
+            }) as Promise<string>,
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error("LLM timeout")), 90_000)
+            ),
+          ]);
+          analysis = (raw as string).trim();
+          // Extract the SUMMARY line for the short preview
+          const summaryMatch = analysis.match(/SUMMARY:\s*(.+)/i);
+          if (summaryMatch) summary = summaryMatch[1].trim();
+        } catch (llmErr) {
+          console.warn("[Pulse:Routes] upload: LLM analysis failed:", llmErr instanceof Error ? llmErr.message : String(llmErr));
+        }
+
+        const docId = crypto.randomUUID();
+        docStore.set(docId, { filename, text: textForStore, pageCount, summary });
+
+        console.log(`[Pulse:Routes] PDF uploaded: ${filename} (${pageCount}p, ${pdfText.length} chars) → docId=${docId}`);
+        ok(res, { docId, filename, summary, analysis, pageCount, text: textForStore.slice(0, 4_000) });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[Pulse:Routes] POST /pulse/upload: ${msg}`);
+        err(res, msg);
+      }
+    },
+  },
+
+  // ── POST /pulse/auth/token ───────────────────────────────────────────────
+  // Accepts a refresh token pasted directly by the user (fallback for Nosana
+  // deployments where the OAuth redirect URI can't be pre-registered).
+  {
+    type: "POST" as const,
+    path: "/auth/token",
+    handler: async (req: RouteRequest, res: RouteResponse, _runtime: IAgentRuntime) => {
+      const { refreshToken } = (req.body ?? {}) as { refreshToken?: string };
+      if (!refreshToken?.trim()) {
+        (res as unknown as { status: (c: number) => { json: (b: unknown) => void } })
+          .status(400).json({ error: "refreshToken is required" });
+        return;
+      }
+      await saveRefreshToken(refreshToken.trim());
+      ok(res, { success: true });
+    },
+  },
+
+  // ── GET /pulse/auth/status ────────────────────────────────────────────────
+  {
+    type: "GET" as const,
+    path: "/auth/status",
+    handler: async (_req: RouteRequest, res: RouteResponse, _runtime: IAgentRuntime) => {
+      const configured = await isGoogleAuthConfigured();
+      const hasClientId = Boolean(process.env.GOOGLE_CLIENT_ID);
+      const hasClientSecret = Boolean(process.env.GOOGLE_CLIENT_SECRET);
+      ok(res, {
+        configured,
+        canStartOAuth: hasClientId && hasClientSecret,
+        hasClientId,
+        hasClientSecret,
+        relayUri: "https://py-tr.github.io/agent-challenge/oauth-relay.html",
+      });
+    },
+  },
+
+  // ── GET /pulse/auth/google ────────────────────────────────────────────────
+  // Builds the Google OAuth consent URL and redirects the browser to it.
+  // Uses the static GitHub Pages relay as redirect_uri so any Pulse deployment
+  // (local or Nosana dynamic node) works with a single pre-registered URI.
+  {
+    type: "GET" as const,
+    path: "/auth/google",
+    handler: async (_req: RouteRequest, res: RouteResponse, _runtime: IAgentRuntime) => {
+      const clientId = process.env.GOOGLE_CLIENT_ID;
+      const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+      if (!clientId || !clientSecret) {
+        (res as unknown as { status: (c: number) => { send: (s: string) => void } })
+          .status(400)
+          .send("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set before starting OAuth.");
+        return;
+      }
+
+      const port = process.env.SERVER_PORT ?? "3000";
+      const pulseOrigin = process.env.PULSE_PUBLIC_URL ?? `http://localhost:${port}`;
+
+      // Static relay hosted on GitHub Pages — registered once in Google Cloud Console.
+      // Receives the callback and forwards the code back to this Pulse instance via state.
+      const RELAY_URI = "https://py-tr.github.io/agent-challenge/oauth-relay.html";
+      const state = Buffer.from(pulseOrigin).toString("base64");
+
+      const scopes = [
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/gmail.modify",
+        "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/calendar.events",
+      ].join(" ");
+
+      const params = new URLSearchParams({
+        client_id:     clientId,
+        redirect_uri:  RELAY_URI,
+        response_type: "code",
+        scope:         scopes,
+        access_type:   "offline",
+        prompt:        "consent",
+        state,
+      });
+
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+      console.log(`[Pulse:Auth] Redirecting to Google OAuth via relay (origin=${pulseOrigin})`);
+      (res as unknown as { redirect: (url: string) => void }).redirect(authUrl);
+    },
+  },
+
+  // ── GET /pulse/auth/google/callback ──────────────────────────────────────
+  // Called directly by Google (localhost) OR forwarded by the GitHub Pages relay
+  // (?relay=1). Exchanges the code using the correct redirect_uri for each case.
+  {
+    type: "GET" as const,
+    path: "/auth/google/callback",
+    handler: async (req: RouteRequest, res: RouteResponse, _runtime: IAgentRuntime) => {
+      const port = process.env.SERVER_PORT ?? "3000";
+      const baseUrl = process.env.PULSE_PUBLIC_URL ?? `http://localhost:${port}`;
+
+      const { code, error, relay } = (req.query ?? {}) as {
+        code?: string; error?: string; relay?: string;
+      };
+
+      // Use relay URI when the code was forwarded by the GitHub Pages relay page.
+      const RELAY_URI = "https://py-tr.github.io/agent-challenge/oauth-relay.html";
+      const redirectUri = relay === "1" ? RELAY_URI : `${baseUrl}/pulse/auth/google/callback`;
+
+      if (error || !code) {
+        console.error(`[Pulse:Auth] OAuth error: ${error ?? "no code"}`);
+        (res as unknown as { redirect: (url: string) => void })
+          .redirect("/?auth=error");
+        return;
+      }
+
+      try {
+        const clientId     = process.env.GOOGLE_CLIENT_ID!;
+        const clientSecret = process.env.GOOGLE_CLIENT_SECRET!;
+
+        const tokenResp = await fetch("https://oauth2.googleapis.com/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            code,
+            client_id:     clientId,
+            client_secret: clientSecret,
+            redirect_uri:  redirectUri,
+            grant_type:    "authorization_code",
+          }),
+        });
+
+        if (!tokenResp.ok) {
+          const body = await tokenResp.text();
+          throw new Error(`Token exchange failed ${tokenResp.status}: ${body}`);
+        }
+
+        const tokens = (await tokenResp.json()) as {
+          access_token: string;
+          refresh_token?: string;
+          expires_in: number;
+        };
+
+        if (!tokens.refresh_token) {
+          throw new Error("No refresh_token in response — re-authorize with prompt=consent");
+        }
+
+        await saveRefreshToken(tokens.refresh_token);
+        console.log("[Pulse:Auth] Refresh token saved to .eliza/pulse-auth.json");
+
+        (res as unknown as { redirect: (url: string) => void })
+          .redirect("/?auth=success");
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[Pulse:Auth] Callback error: ${msg}`);
+        (res as unknown as { redirect: (url: string) => void })
+          .redirect(`/?auth=error&reason=${encodeURIComponent(msg)}`);
+      }
+    },
+  },
 ];
+
+/** Retrieve stored document text by docId (called from ChatDrawer context injection). */
+export function getDocText(docId: string): string | null {
+  return docStore.get(docId)?.text ?? null;
+}
 
 // ─── Inbox health score ───────────────────────────────────────────────────────
 

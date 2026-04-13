@@ -63,10 +63,66 @@ const CLASSIFY_SYSTEM = `You are an email triage assistant. Classify the email i
 
 Reply with ONLY a single word — the category name. No punctuation, no explanation.`;
 
+// ─── Pre-LLM noise filter ─────────────────────────────────────────────────────
+
+/**
+ * Senders that should NEVER become action items — transactional mailers,
+ * security notifications, newsletter platforms, etc.
+ * Checked before the LLM to save inference cost and avoid spam in the queue.
+ */
+const NOISE_SENDER_PATTERNS = [
+  /no-?reply@/i,
+  /noreply@/i,
+  /do-?not-?reply@/i,
+  /@accounts\.google\.com/i,
+  /@security\.google\.com/i,
+  /@notifications?\.google\.com/i,
+  /mailer-daemon@/i,
+  /postmaster@/i,
+  /@bounce\./i,
+];
+
+const NOISE_SUBJECT_PATTERNS = [
+  /security alert/i,
+  /sign-?in attempt/i,
+  /new sign-?in/i,
+  /account activity/i,
+  /unsubscribe/i,
+  /verify your email/i,
+  /email confirmation/i,
+  /password reset/i,
+  /two-?factor/i,
+  /2-?step verification/i,
+];
+
+function isDefinitelyNoise(msg: GmailMessage): boolean {
+  if (NOISE_SENDER_PATTERNS.some((re) => re.test(msg.from))) return true;
+  if (NOISE_SUBJECT_PATTERNS.some((re) => re.test(msg.subject))) return true;
+  return false;
+}
+
 export async function classifyEmail(
   runtime: IAgentRuntime,
   msg: GmailMessage
 ): Promise<ClassificationResult> {
+  // Short-circuit: skip LLM for obvious automated/transactional mail.
+  if (isDefinitelyNoise(msg)) {
+    return { category: "noise", actionItemType: null, priority: 10, body: msg.snippet };
+  }
+
+  // Re: emails are replies someone sent TO the user — treat as action-required
+  // (user should respond). Never classify as follow-up based on subject keywords.
+  const isReply = /^re:/i.test(msg.subject.trim());
+  if (isReply) {
+    return {
+      category: "action-required",
+      actionItemType: "email_draft",
+      priority: 3,
+      body: buildReplyDraft(msg),
+      metadata: { from: msg.from, messageId: msg.id },
+    };
+  }
+
   const prompt = `${CLASSIFY_SYSTEM}
 
 Email to classify:
@@ -245,9 +301,6 @@ function buildReplyDraft(msg: GmailMessage): string {
   // Show up to 400 chars of the original message so the reply is contextual.
   const original = msg.snippet.trim().slice(0, 400);
 
-  // Clean subject for use in the greeting (strip Re:/Fwd: prefixes).
-  const topic = msg.subject.replace(/^(re|fwd?|fw):\s*/i, "").trim().toLowerCase();
-
   return (
     `**From:** ${msg.from}\n` +
     `**Subject:** ${msg.subject}\n\n` +
@@ -256,7 +309,6 @@ function buildReplyDraft(msg: GmailMessage): string {
     `---\n\n` +
     `**Suggested reply scaffold:**\n\n` +
     `Hi ${firstName},\n\n` +
-    `Thanks for reaching out about ${topic}.\n\n` +
     `[Add your response here]\n\n` +
     `Best,\n${USER_DISPLAY_NAME}\n\n` +
     `---\n\n` +

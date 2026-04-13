@@ -48,11 +48,28 @@ export interface NosanaMetrics {
   llmCallCount: number;
   /** Exponential moving average of inference latency in ms. Null until first call. */
   avgLatencyMs: number | null;
+  /** Estimated tokens/sec across all inferences. Null until 2+ calls. */
+  tokensPerSec: number | null;
+  /** Rough total tokens generated (responseChars / 4). */
+  totalTokensEstimated: number;
+  /** Estimated cost in USD based on Nosana pricing. */
+  estimatedCostUsd: number;
   uptimeMs: number;
   jobType: string;
   startedAt: string;
   /** Active model display name (e.g. "Qwen3.5-27B-AWQ-4bit"). Never the API key or URL. */
   modelName: string | null;
+}
+
+export interface DayBucket {
+  date: string;
+  approved: number;
+  rejected: number;
+}
+
+export interface AnalyticsResponse {
+  weekly: DayBucket[];
+  patterns: DecisionPattern[];
 }
 
 export interface StatusResponse {
@@ -193,6 +210,14 @@ export const pulseApi = {
       { method: "POST", body: JSON.stringify({ message }) }
     ),
 
+  getAnalytics: () => request<AnalyticsResponse>("/pulse/analytics"),
+
+  summarizeEmail: (params: { subject: string; from: string; body: string }) =>
+    request<{ summary: string }>("/pulse/summarize-email", {
+      method: "POST",
+      body: JSON.stringify(params),
+    }),
+
   getBriefing: () => request<BriefingResponse>("/pulse/briefing"),
 
   findFreeSlots: (params: { date: string; durationMinutes: number; excludeEventIds?: string[] }) =>
@@ -225,6 +250,42 @@ export const pulseApi = {
       `/pulse/dismiss/${id}`,
       { method: "POST" }
     ),
+
+  /**
+   * Upload a PDF file for text extraction and LLM summarization.
+   * Returns a docId the caller can attach to subsequent chat messages.
+   */
+  sendDirect: (params: { to: string; subject: string; body: string }) =>
+    request<{ success: boolean; messageId: string }>(
+      "/pulse/send-direct",
+      { method: "POST", body: JSON.stringify(params) }
+    ),
+
+  classifyIntent: (params: { message: string; hasDoc?: boolean; docFilename?: string }) =>
+    request<{ intent: "doc_email" | "general"; params: { to?: string } }>(
+      "/pulse/classify-intent",
+      { method: "POST", body: JSON.stringify(params) }
+    ),
+
+  getAuthStatus: () =>
+    request<{ configured: boolean; canStartOAuth: boolean; hasClientId: boolean; hasClientSecret: boolean; relayUri: string }>(
+      "/pulse/auth/status"
+    ),
+
+  saveAuthToken: (refreshToken: string) =>
+    request<{ success: boolean }>("/pulse/auth/token", {
+      method: "POST",
+      body: JSON.stringify({ refreshToken }),
+    }),
+
+  uploadDocument: async (file: File): Promise<{ docId: string; filename: string; summary: string; analysis: string; pageCount: number; text: string }> => {
+    const arrayBuf = await file.arrayBuffer();
+    const base64   = btoa(String.fromCharCode(...new Uint8Array(arrayBuf)));
+    return request<{ docId: string; filename: string; summary: string; analysis: string; pageCount: number; text: string }>(
+      "/pulse/upload",
+      { method: "POST", body: JSON.stringify({ filename: file.name, data: base64 }) }
+    );
+  },
 };
 
 // ─── ElizaOS agent / sessions API ────────────────────────────────────────────

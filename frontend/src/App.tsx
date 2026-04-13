@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { RefreshCw, AlertCircle, ChevronDown, ChevronUp, CheckCircle, MessageSquare, Maximize2 } from "lucide-react";
+import { RefreshCw, AlertCircle, ChevronDown, ChevronUp, CheckCircle, MessageSquare, Maximize2, X as XIcon } from "lucide-react";
 import { useActionQueue } from "./hooks/useActionQueue";
 import { agentApi, pulseApi, type ActionItem, type EmailDraftContext, type BriefingData, type ConflictContext } from "./api/pulseApi";
 import { Sidebar, type SidebarView } from "./components/Sidebar";
@@ -10,6 +10,7 @@ import { DecisionHistory } from "./components/DecisionHistory";
 import { ChatDrawer } from "./components/ChatDrawer";
 import { BriefingPanel } from "./components/BriefingPanel";
 import { FocusMode } from "./components/FocusMode";
+import { AnalyticsView } from "./components/AnalyticsView";
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 
@@ -172,6 +173,144 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
+// ─── Google Auth Banner ───────────────────────────────────────────────────────
+
+function GoogleAuthBanner({
+  status,
+  canStartOAuth,
+  onDismiss,
+  onTokenSaved,
+}: {
+  status: "unconfigured" | "success" | "error";
+  canStartOAuth: boolean;
+  onDismiss: () => void;
+  onTokenSaved: () => void;
+}) {
+  const [showPaste, setShowPaste] = useState(false);
+  const [tokenInput, setTokenInput] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  async function handleSaveToken() {
+    if (!tokenInput.trim()) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await pulseApi.saveAuthToken(tokenInput.trim());
+      onTokenSaved();
+    } catch {
+      setSaveError("Failed to save token. Check it's a valid refresh token.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (status === "success") {
+    return (
+      <div className="mb-4 flex items-center justify-between rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+        <div className="flex items-center gap-2">
+          <CheckCircle size={15} />
+          <span>Google account connected. Gmail &amp; Calendar are ready.</span>
+        </div>
+        <button onClick={onDismiss} className="ml-4 text-green-500 hover:text-green-700">
+          <XIcon size={14} />
+        </button>
+      </div>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <div className="mb-4 flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="flex items-center gap-2">
+          <AlertCircle size={15} />
+          <span>Google sign-in failed. Check your Client ID &amp; Secret, then try again.</span>
+        </div>
+        <div className="ml-4 flex items-center gap-2">
+          {canStartOAuth && (
+            <a href="/pulse/auth/google" className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 transition-colors">
+              Retry
+            </a>
+          )}
+          <button onClick={onDismiss} className="text-red-400 hover:text-red-600"><XIcon size={14} /></button>
+        </div>
+      </div>
+    );
+  }
+
+  // unconfigured — paste input (shown when showPaste or no OAuth available)
+  const pasteSection = (
+    <div className="mt-2 flex items-center gap-2">
+      <input
+        type="password"
+        placeholder="Paste refresh token…"
+        value={tokenInput}
+        onChange={(e) => setTokenInput(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && void handleSaveToken()}
+        className="flex-1 rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-amber-400"
+      />
+      <button
+        onClick={() => void handleSaveToken()}
+        disabled={saving || !tokenInput.trim()}
+        className="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50 transition-colors"
+      >
+        {saving ? "Saving…" : "Save"}
+      </button>
+      {saveError && <span className="text-xs text-red-600">{saveError}</span>}
+    </div>
+  );
+
+  if (!canStartOAuth) {
+    return (
+      <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={15} />
+            <span>Connect Google to enable Gmail &amp; Calendar. Paste a refresh token below.</span>
+          </div>
+          <button onClick={onDismiss} className="ml-4 text-amber-500 hover:text-amber-700"><XIcon size={14} /></button>
+        </div>
+        {pasteSection}
+      </div>
+    );
+  }
+
+  // Client credentials present — show OAuth button + paste fallback
+  return (
+    <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <AlertCircle size={15} />
+          <span>Connect your Google account to enable Gmail &amp; Calendar.</span>
+        </div>
+        <div className="ml-4 flex items-center gap-2">
+          <a
+            href="/pulse/auth/google"
+            className="flex items-center gap-1.5 rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 shadow-sm hover:bg-amber-50 transition-colors"
+          >
+            <svg width="14" height="14" viewBox="0 0 48 48" className="flex-shrink-0">
+              <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+              <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+              <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+              <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+              <path fill="none" d="M0 0h48v48H0z"/>
+            </svg>
+            Sign in with Google
+          </a>
+          <button
+            onClick={() => setShowPaste((v) => !v)}
+            className="text-xs text-amber-600 underline hover:text-amber-800"
+          >
+            {showPaste ? "Cancel" : "Paste token"}
+          </button>
+          <button onClick={onDismiss} className="text-amber-500 hover:text-amber-700"><XIcon size={14} /></button>
+        </div>
+      </div>
+      {showPaste && pasteSection}
+    </div>
+  );
+}
+
 // ─── App ─────────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -181,6 +320,10 @@ export default function App() {
   const [briefing, setBriefing] = useState<BriefingData | null>(null);
   const [briefingLoading, setBriefingLoading] = useState(true);
   const [focusMode, setFocusMode] = useState(false);
+
+  // Google OAuth banner
+  const [authBanner, setAuthBanner] = useState<"unconfigured" | "success" | "error" | null>(null);
+  const [canStartOAuth, setCanStartOAuth] = useState(false);
 
   // Chat drawer
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -206,13 +349,60 @@ export default function App() {
     agentApi.fetchAgentId().then(setAgentId).catch(() => {});
   }, []);
 
-  // Fetch briefing once on mount (fires ~5s after agent start)
+  // Check OAuth callback result from query param, then poll auth status
   useEffect(() => {
-    setBriefingLoading(true);
-    pulseApi.getBriefing()
-      .then((r) => setBriefing(r.briefing))
-      .catch(() => {})
-      .finally(() => setBriefingLoading(false));
+    const params = new URLSearchParams(window.location.search);
+    const authParam = params.get("auth");
+
+    if (authParam === "success") {
+      setAuthBanner("success");
+      // Clean up URL without full reload
+      window.history.replaceState({}, "", window.location.pathname);
+      return;
+    }
+    if (authParam === "error") {
+      setAuthBanner("error");
+      window.history.replaceState({}, "", window.location.pathname);
+      return;
+    }
+
+    // No callback param — check if Google is configured
+    pulseApi.getAuthStatus()
+      .then(({ configured, canStartOAuth: can }) => {
+        setCanStartOAuth(can);
+        if (!configured) setAuthBanner("unconfigured");
+      })
+      .catch(() => { /* silently ignore if backend not ready */ });
+  }, []);
+
+  // Fetch briefing on mount, then retry every 4s until data arrives (briefing
+  // fires ~5s after agent start — frontend may load before it's ready).
+  useEffect(() => {
+    let cancelled = false;
+    let retries = 0;
+    const MAX_RETRIES = 8; // ~32 seconds total
+
+    async function fetchBriefing() {
+      setBriefingLoading(true);
+      try {
+        const r = await pulseApi.getBriefing();
+        if (cancelled) return;
+        if (r.briefing) {
+          setBriefing(r.briefing);
+          setBriefingLoading(false);
+        } else if (retries < MAX_RETRIES) {
+          retries++;
+          setTimeout(fetchBriefing, 4_000);
+        } else {
+          setBriefingLoading(false);
+        }
+      } catch {
+        if (!cancelled) setBriefingLoading(false);
+      }
+    }
+
+    void fetchBriefing();
+    return () => { cancelled = true; };
   }, []);
 
   function openChatWithContext(item: ActionItem) {
@@ -484,7 +674,10 @@ export default function App() {
   void rejected;
 
   const viewTitle =
-    view === "history" ? "History" : view === "commitments" ? "Commitments" : "Inbox";
+    view === "history" ? "History"
+    : view === "commitments" ? "Commitments"
+    : view === "analytics" ? "Analytics"
+    : "Inbox";
   const viewSubtitle =
     view === "history"
       ? `${decisions?.total ?? 0} past decisions`
@@ -492,6 +685,8 @@ export default function App() {
       ? committedCount === 0
         ? "No pending commitments"
         : `${committedCount} commitment${committedCount === 1 ? "" : "s"} need your attention`
+      : view === "analytics"
+      ? "Decision patterns and activity"
       : loading
       ? "Loading…"
       : pending === 0
@@ -519,6 +714,15 @@ export default function App() {
         )}
 
         <main className="mx-auto max-w-5xl px-8 py-8">
+          {authBanner && (
+            <GoogleAuthBanner
+              status={authBanner}
+              canStartOAuth={canStartOAuth}
+              onDismiss={() => setAuthBanner(null)}
+              onTokenSaved={() => setAuthBanner("success")}
+            />
+          )}
+
           <TopBar
             title={viewTitle}
             subtitle={viewSubtitle}
@@ -528,6 +732,8 @@ export default function App() {
             onProcessInbox={view === "queue" ? handleProcessInbox : undefined}
             processingInbox={processingInbox}
           />
+
+          {view === "analytics" && <AnalyticsView />}
 
           {view === "history" && (
             <HistoryView data={decisions} loading={loading} />

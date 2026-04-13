@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { X, ArrowUp, Square, MessageSquare, Mail, Send, Check, ChevronDown } from "lucide-react";
+import { X, ArrowUp, Square, MessageSquare, Mail, Send, Check, ChevronDown, Paperclip, FileText, RotateCcw } from "lucide-react";
 import { agentApi, pulseApi, type EmailDraftContext, type ConflictContext } from "../api/pulseApi";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -20,6 +20,11 @@ interface ChatMessage {
    * response, this bubble is removed and replaced with the actual reply.
    */
   pollingPlaceholder?: boolean;
+  /**
+   * When set, renders doc action chips (Email summary, Copy) below the bubble.
+   * Populated on the PDF analysis message so the user can act without typing.
+   */
+  docChips?: { docId: string; filename: string; text: string };
 }
 
 interface Props {
@@ -447,98 +452,213 @@ function CalendarOfferPanel({
   onSchedule: (title: string, date: string, time: string) => void;
   onDecline: () => void;
 }) {
-  const defaultDate = (() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    return d.toISOString().slice(0, 10);
-  })();
+  // Extract a clean meeting title from the email subject
+  const meetingTitle = offer.subject
+    .replace(/^(re|fwd?|fw):\s*/i, "")
+    .replace(/^(thursday|friday|monday|tuesday|wednesday|saturday|sunday)\s*\d*\w*\s*-?\s*/i, "")
+    .trim() || "Meeting";
 
-  const [showForm, setShowForm] = useState(false);
-  const [title, setTitle] = useState(`Follow up: ${offer.subject}`);
-  const [date, setDate] = useState(defaultDate);
-  const [time, setTime] = useState("10:00");
+  return (
+    <div className="rounded-xl border p-3 text-xs space-y-2.5" style={{ borderColor: "#bfdbfe", backgroundColor: "#eff6ff" }}>
+      <p className="font-medium text-[11px]" style={{ color: "#1e40af" }}>
+        📅 Want to add a meeting to your calendar?
+      </p>
+      <p className="text-[10px]" style={{ color: "#3b82f6" }}>
+        Just tell me when — e.g. <em>"add {meetingTitle} Thursday at 3pm"</em>
+      </p>
+      <div className="flex gap-2">
+        <button
+          onClick={() => onSchedule(meetingTitle, "", "")}
+          className="flex-1 rounded-lg px-3 py-1.5 text-[10px] font-semibold text-white transition-colors active:scale-95"
+          style={{ backgroundColor: "#2563eb" }}
+        >
+          Yes, tell me when →
+        </button>
+        <button
+          onClick={onDecline}
+          className="rounded-lg border px-3 py-1.5 text-[10px] font-medium transition-colors hover:opacity-80 active:scale-95"
+          style={{ borderColor: "#bfdbfe", backgroundColor: "#fff", color: "#6b7280" }}
+        >
+          No thanks
+        </button>
+      </div>
+    </div>
+  );
+}
 
-  if (!showForm) {
+// ─── InlineEmailSend ─────────────────────────────────────────────────────────
+
+interface InlineEmailSendProps {
+  draft: { to: string; subject: string; body: string };
+  onSent: (to: string) => void;
+  onDiscard: () => void;
+  userDisplayName?: string;
+}
+
+function InlineEmailSend({ draft, onSent, onDiscard, userDisplayName }: InlineEmailSendProps) {
+  const [to, setTo]       = useState(draft.to);
+  const [body, setBody]   = useState(draft.body);
+  const [sending, setSending] = useState(false);
+  const [sent, setSent]   = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSend() {
+    if (!to.trim()) { setError("Enter a recipient email"); return; }
+    setSending(true);
+    setError(null);
+    try {
+      let finalBody = body;
+      if (userDisplayName) {
+        const bareSignoff = /\b(best\s+regards|kind\s+regards)[,.]?\s*$/i;
+        if (bareSignoff.test(finalBody.trimEnd())) {
+          finalBody = finalBody.trimEnd() + "\n" + userDisplayName;
+        }
+      }
+      await pulseApi.sendDirect({ to: to.trim(), subject: draft.subject, body: finalBody });
+      setSent(true);
+      setTimeout(() => onSent(to.trim()), 1200);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Send failed");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  if (sent) {
     return (
-      <div className="rounded-xl border p-3 text-xs space-y-2" style={{ borderColor: "#bfdbfe", backgroundColor: "#eff6ff" }}>
-        <p className="font-medium" style={{ color: "#1e40af" }}>
-          Schedule a follow-up meeting?
-        </p>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setShowForm(true)}
-            className="flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-colors active:scale-95"
-            style={{ backgroundColor: "#2563eb" }}
-          >
-            Yes, schedule it
-          </button>
-          <button
-            onClick={onDecline}
-            className="flex-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:opacity-80 active:scale-95"
-            style={{ borderColor: "#bfdbfe", backgroundColor: "#fff", color: "#2563eb" }}
-          >
-            No thanks
-          </button>
-        </div>
+      <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+        <Check size={14} />
+        <span>Email sent to {to}</span>
       </div>
     );
   }
 
   return (
-    <div className="rounded-xl border p-3 text-xs space-y-2" style={{ borderColor: "#bfdbfe", backgroundColor: "#eff6ff" }}>
-      <p className="font-semibold" style={{ color: "#1e40af" }}>Schedule a follow-up</p>
+    <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-3 text-xs">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-1.5 font-semibold text-indigo-700">
+          <Mail size={12} />
+          <span>Send Summary</span>
+        </div>
+        <button onClick={onDiscard} className="text-gray-400 hover:text-gray-600">
+          <X size={12} />
+        </button>
+      </div>
 
-      <div>
-        <label className="mb-0.5 block text-[10px] font-medium" style={{ color: "#6b7280" }}>Title</label>
+      <div className="mb-1.5">
+        <span className="font-medium text-gray-700">To: </span>
         <input
-          type="text"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          className="w-full rounded border px-2 py-1 text-xs focus:outline-none focus:ring-1"
-          style={{ borderColor: "#bfdbfe", backgroundColor: "#fff", color: "#1f2937" }}
+          type="email"
+          value={to}
+          onChange={(e) => setTo(e.target.value)}
+          placeholder="recipient@example.com"
+          className="rounded border border-indigo-100 bg-white px-1.5 py-0.5 text-xs text-gray-800 focus:outline-none focus:border-indigo-300 w-full mt-0.5"
         />
       </div>
 
-      <div className="flex gap-2">
-        <div className="flex-1">
-          <label className="mb-0.5 block text-[10px] font-medium" style={{ color: "#6b7280" }}>Date</label>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="w-full rounded border px-2 py-1 text-xs focus:outline-none"
-            style={{ borderColor: "#bfdbfe", backgroundColor: "#fff", color: "#1f2937" }}
-          />
-        </div>
-        <div>
-          <label className="mb-0.5 block text-[10px] font-medium" style={{ color: "#6b7280" }}>Time</label>
-          <input
-            type="time"
-            value={time}
-            onChange={(e) => setTime(e.target.value)}
-            className="rounded border px-2 py-1 text-xs focus:outline-none"
-            style={{ borderColor: "#bfdbfe", backgroundColor: "#fff", color: "#1f2937", width: "90px" }}
-          />
-        </div>
+      <div className="mb-2 text-gray-500">
+        <span className="font-medium text-gray-700">Subject:</span> {draft.subject}
       </div>
 
-      <div className="flex gap-2 pt-0.5">
-        <button
-          onClick={() => onSchedule(title, date, time)}
-          disabled={!title.trim() || !date || !time}
-          className="flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-colors disabled:opacity-40 active:scale-95"
-          style={{ backgroundColor: "#2563eb" }}
-        >
-          Add to Calendar
-        </button>
-        <button
-          onClick={onDecline}
-          className="rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:opacity-80 active:scale-95"
-          style={{ borderColor: "#bfdbfe", backgroundColor: "#fff", color: "#2563eb" }}
-        >
-          Cancel
-        </button>
-      </div>
+      <textarea
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        rows={6}
+        className="w-full rounded border border-indigo-100 bg-white p-2 text-xs text-gray-800 focus:outline-none focus:border-indigo-300 resize-none mb-2"
+      />
+
+      {error && <p className="mb-1.5 text-[10px] text-red-500">{error}</p>}
+
+      <button
+        onClick={() => void handleSend()}
+        disabled={sending || !to.trim()}
+        className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-indigo-600 py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 disabled:opacity-40 active:scale-[0.98]"
+      >
+        {sending ? (
+          <span className="inline-flex items-center gap-0.5">
+            {[0,1,2].map((i) => (
+              <span key={i} className="h-1 w-1 rounded-full bg-white animate-bounce" style={{ animationDelay: `${i*150}ms` }} />
+            ))}
+          </span>
+        ) : (
+          <><Send size={11} /><span>Send Email</span></>
+        )}
+      </button>
+    </div>
+  );
+}
+
+// ─── DocActionChips ───────────────────────────────────────────────────────────
+
+interface DocActionChipsProps {
+  doc: { filename: string; text: string };
+  onEmail: (to: string, doc: { filename: string; text: string }) => void;
+}
+
+function DocActionChips({ doc, onEmail }: DocActionChipsProps) {
+  const [showInput, setShowInput] = useState(false);
+  const [to, setTo] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function handleEmailClick() {
+    setShowInput(true);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }
+
+  function handleSubmit() {
+    if (!to.trim()) return;
+    onEmail(to.trim(), doc);
+    setShowInput(false);
+    setTo("");
+  }
+
+  return (
+    <div className="mt-2 flex flex-col gap-1.5">
+      {!showInput ? (
+        <div className="flex gap-2">
+          <button
+            onClick={handleEmailClick}
+            className="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100 active:scale-95"
+          >
+            <Mail size={11} />
+            Email summary to…
+          </button>
+          <button
+            onClick={() => {
+              void navigator.clipboard.writeText(doc.text);
+            }}
+            className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-100 active:scale-95"
+          >
+            <FileText size={11} />
+            Copy text
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5">
+          <input
+            ref={inputRef}
+            type="email"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); if (e.key === "Escape") { setShowInput(false); setTo(""); } }}
+            placeholder="recipient@example.com"
+            className="flex-1 rounded-lg border border-indigo-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-indigo-400"
+          />
+          <button
+            onClick={handleSubmit}
+            disabled={!to.trim()}
+            className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 disabled:opacity-40 active:scale-95"
+          >
+            Draft
+          </button>
+          <button
+            onClick={() => { setShowInput(false); setTo(""); }}
+            className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-500 hover:bg-gray-50 active:scale-95"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -574,12 +694,17 @@ export function ChatDrawer({
   const [smartReplies, setSmartReplies] = useState<string[]>([]);
   const [isLoadingReplies, setIsLoadingReplies] = useState(false);
   const [calendarOffer, setCalendarOffer] = useState<CalendarOffer | null>(null);
+  const [attachedDoc, setAttachedDoc] = useState<{ docId: string; filename: string; text?: string } | null>(null);
+  const [isUploadingDoc, setIsUploadingDoc] = useState(false);
+  const [inlineEmailDraft, setInlineEmailDraft] = useState<{ to: string; subject: string; body: string } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const draftTextareaRef = useRef<HTMLTextAreaElement>(null);
   const toInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachedDocRef = useRef<{ docId: string; filename: string; text?: string } | null>(null);
   const isNearBottomRef = useRef(true);
   const processedAutoSend = useRef<string | null>(null);
   const welcomeShown = useRef(false);
@@ -603,6 +728,7 @@ export function ChatDrawer({
   useEffect(() => { currentDraftBodyRef.current = currentDraftBody; }, [currentDraftBody]);
   useEffect(() => { currentDraftToRef.current = currentDraftTo; }, [currentDraftTo]);
   useEffect(() => { emailDraftRef.current = emailDraft; }, [emailDraft]);
+  useEffect(() => { attachedDocRef.current = attachedDoc; }, [attachedDoc]);
 
   // ── Polling helpers ──────────────────────────────────────────────────────────
 
@@ -809,24 +935,117 @@ export function ChatDrawer({
 
   const handleDeclineFollowUp = useCallback(() => {
     setCalendarOffer(null);
-    onClose();
-  }, [onClose]);
+  }, []);
 
   const handleScheduleFollowUp = useCallback(
-    async (title: string, date: string, time: string) => {
-      const offer = calendarOffer;
-      if (!offer) return;
+    async (title: string, _date: string, _time: string) => {
       setCalendarOffer(null);
-
-      // Build a natural-language request — CreateCalendarEventAction parses it.
-      const msg =
-        `Schedule a calendar event: "${title}" with ${offer.recipient} ` +
-        `on ${date} at ${time}. Please confirm once added.`;
-
-      await sendToAgentRef.current?.(msg);
+      // Pre-fill the input so the user can type when — more natural than a form.
+      setInput(`Schedule a meeting: "${title}" — `);
+      setTimeout(() => textareaRef.current?.focus(), 50);
     },
-    [calendarOffer]
+    []
   );
+
+  // ── Document upload ─────────────────────────────────────────────────────────
+
+  const handleFileUpload = useCallback(async (file: File) => {
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "agent", text: "Only PDF files are supported for document upload.", ts: new Date() },
+      ]);
+      return;
+    }
+
+    setIsUploadingDoc(true);
+    const readingText = `Extracting text from "${file.name}"…`;
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", text: `📎 ${file.name}`, ts: new Date() },
+      { role: "agent", text: readingText, ts: new Date(), positive: true },
+    ]);
+
+    try {
+      const result = await pulseApi.uploadDocument(file);
+
+      // Replace the "extracting" placeholder with the full LLM analysis.
+      // The analysis is generated server-side by the same LLM path as /draft-assist —
+      // no ElizaOS session needed, so no SESSION_NOT_FOUND errors.
+      setMessages((prev) => {
+        const withoutPlaceholder = prev.filter((m) => m.text !== readingText);
+        return [
+          ...withoutPlaceholder,
+          {
+            role: "agent",
+            text: result.analysis,
+            ts: new Date(),
+            docChips: { docId: result.docId, filename: result.filename, text: result.text },
+          },
+        ];
+      });
+
+      // Keep doc attached so follow-up questions still get context injected
+      setAttachedDoc({ docId: result.docId, filename: result.filename, text: result.text });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Upload failed";
+      setMessages((prev) => [
+        ...prev.filter((m) => m.text !== readingText),
+        { role: "agent", text: `Could not upload document: ${msg}`, ts: new Date() },
+      ]);
+    } finally {
+      setIsUploadingDoc(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }, []); // no session dependency — analysis is fully server-side
+
+  // ── Doc email chip handler ──────────────────────────────────────────────────
+  // Called by the "Email summary to..." chip on the PDF analysis bubble.
+  // Takes recipient from an inline input — no natural language parsing needed.
+  const handleDocEmail = useCallback(async (toAddr: string, doc: { filename: string; text: string }) => {
+    if (!toAddr.trim()) return;
+    setIsLoading(true);
+    const subject = `Summary: ${doc.filename.replace(/\.pdf$/i, "")}`;
+    try {
+      const { reply } = await pulseApi.draftAssist({
+        subject,
+        to: toAddr.trim(),
+        currentBody: doc.text.slice(0, 3_000),
+        instruction:
+          "Draft a concise professional email to the recipient summarising the key points, " +
+          "action items, and deadlines from this document. " +
+          "Start with Hi [first name], end with Best regards. Keep it under 200 words.",
+      });
+      const cleanDraft = reply
+        .replace(/^```[\w]*\n?/im, "")
+        .replace(/\n?```$/m, "")
+        .replace(/^---\n?/m, "")
+        .replace(/\n?---$/m, "")
+        .replace(/\[CALENDAR_INTENT\]/g, "")
+        .trim();
+      setInlineEmailDraft({ to: toAddr.trim(), subject, body: cleanDraft });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      setMessages((prev) => [
+        ...prev,
+        { role: "agent", text: `Couldn't draft the email: ${msg}`, ts: new Date() },
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // ── New chat reset ──────────────────────────────────────────────────────────
+  const handleNewChat = useCallback(() => {
+    setMessages([]);
+    setSessionId(null);
+    setAttachedDoc(null);
+    setInlineEmailDraft(null);
+    setCalendarOffer(null);
+    setInput("");
+    setIsLoading(false);
+    welcomeShown.current = false;
+  }, []);
 
   // ── Core send function ──────────────────────────────────────────────────────
 
@@ -855,6 +1074,33 @@ export function ChatDrawer({
       sentAtRef.current = new Date();
       setMessages((prev) => [...prev, { role: "user", text: trimmed, ts: new Date() }]);
       setIsLoading(true);
+
+      // ── Calendar creation: intercept before EVERYTHING (including draft mode) ─
+      // Matches even when the user is in the email draft drawer — e.g.
+      // "put a meeting with Sarah in my calendar at 3pm Thursday".
+      const CALENDAR_CREATE_RE =
+        /\b(schedule|book|set\s+up|create)\b.{0,120}\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next\s+week|at\s+\d|\d{1,2}:\d{2})/i;
+      const CALENDAR_EXPLICIT_RE =
+        /\b(put|add)\b.{0,120}\b(in(to)?|on(to)?)\s+(my\s+)?(calendar|cal)\b/i;
+
+      if (CALENDAR_CREATE_RE.test(trimmed) || CALENDAR_EXPLICIT_RE.test(trimmed)) {
+        try {
+          const result = await pulseApi.createCalendarEvent(trimmed);
+          setMessages((prev) => [
+            ...prev,
+            { role: "agent", text: result.confirmText, ts: new Date(), positive: true },
+          ]);
+        } catch (e) {
+          const message = e instanceof Error ? e.message : "Unknown error";
+          setMessages((prev) => [
+            ...prev,
+            { role: "agent", text: `Couldn't create the event: ${message}`, ts: new Date() },
+          ]);
+        } finally {
+          setIsLoading(false);
+        }
+        return;
+      }
 
       // ── Draft mode: bypass the ElizaOS agent pipeline entirely ─────────────
       // Providers (ActionQueueProvider etc.) inject queue/calendar context into
@@ -910,39 +1156,6 @@ export function ChatDrawer({
         return;
       }
 
-      // ── Calendar creation: intercept before ElizaOS pipeline ────────────────
-      // ElizaOS's model selection is unreliable for triggering actions — the LLM
-      // often generates a REPLY that sounds like it created the event but never
-      // calls the action handler. We intercept here and hit the route directly,
-      // same pattern as draft-assist.
-      // Matches: "schedule/book/create X tomorrow at 13:00"
-      const CALENDAR_CREATE_RE =
-        /\b(schedule|book|set\s+up|create)\b.{0,120}\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next\s+week|at\s+\d|\d{1,2}:\d{2})/i;
-      // Matches: "put/add X into/onto my calendar" (event name can appear between verb and calendar)
-      const CALENDAR_EXPLICIT_RE =
-        /\b(put|add)\b.{0,120}\b(in(to)?|on(to)?)\s+(my\s+)?(calendar|cal)\b/i;
-
-      if (!draft && (CALENDAR_CREATE_RE.test(trimmed) || CALENDAR_EXPLICIT_RE.test(trimmed))) {
-        try {
-          const result = await pulseApi.createCalendarEvent(trimmed);
-          setMessages((prev) => [
-            ...prev,
-            { role: "agent", text: result.confirmText, ts: new Date(), positive: true },
-          ]);
-        } catch (e) {
-          const message = e instanceof Error ? e.message : "Unknown error";
-          setMessages((prev) => [
-            ...prev,
-            { role: "agent", text: `Sorry, I couldn't create the calendar event: ${message}`, ts: new Date() },
-          ]);
-        } finally {
-          if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
-          abortRef.current = null;
-          setIsLoading(false);
-        }
-        return;
-      }
-
       // ── Conflict resolution: intercept when chat opened from a conflict card ─
       // If the user says anything that sounds like "reschedule X to Y time",
       // call /pulse/resolve-conflict directly instead of letting ElizaOS hallucinate.
@@ -971,9 +1184,16 @@ export function ChatDrawer({
           ]);
         } catch (e) {
           const message = e instanceof Error ? e.message : "Unknown error";
+          const is404 = message.includes("404") || message.includes("Not Found");
           setMessages((prev) => [
             ...prev,
-            { role: "agent", text: `Sorry, I couldn't process that reschedule: ${message}`, ts: new Date() },
+            {
+              role: "agent",
+              text: is404
+                ? "I couldn't find this event in your Google Calendar — it may have already been moved or doesn't exist yet. You can reschedule it directly in Google Calendar."
+                : `Sorry, I couldn't reschedule that: ${message}`,
+              ts: new Date(),
+            },
           ]);
         } finally {
           if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
@@ -983,8 +1203,60 @@ export function ChatDrawer({
         return;
       }
 
+      // ── Intent classifier: runs when a doc is attached ────────────────────
+      // Lightweight LLM call (~15 tokens output) that tells us whether the user
+      // wants to email the doc or just chat about it. Falls back to general on
+      // any error so the chat always keeps working.
+      const docForClassify = attachedDocRef.current;
+      if (docForClassify?.text != null && !draft && !conflictContext) {
+        try {
+          const classification = await pulseApi.classifyIntent({
+            message: trimmed,
+            hasDoc: true,
+            docFilename: docForClassify.filename,
+          });
+          if (classification.intent === "doc_email") {
+            const toAddr = classification.params.to ?? "";
+            if (toAddr) {
+              // Classifier extracted an email address — draft immediately
+              setIsLoading(false);
+              await handleDocEmail(toAddr, { filename: docForClassify.filename, text: docForClassify.text });
+              return;
+            } else {
+              // Doc email intent but no address — expand the chip's input for them
+              setMessages((prev) => [
+                ...prev,
+                { role: "agent", text: "Sure! Who should I send it to? Use the Email chip below or type an address.", ts: new Date() },
+              ]);
+              setIsLoading(false);
+              return;
+            }
+          }
+          // intent === "general" → fall through to ElizaOS agent
+        } catch {
+          // Classifier failed — silently fall through to general chat
+        }
+      }
+
       // ── General chat: full ElizaOS agent pipeline ───────────────────────────
-      const agentText = trimmed;
+      // If a document is attached, prepend its extracted text as context so the
+      // agent can answer questions about it. Keep the doc attached so the user
+      // can use the Email chip later without losing context.
+      // Cap at 1500 chars so the full message stays well under ElizaOS's 4000-char limit.
+      const docForChat = attachedDocRef.current;
+      let agentText = trimmed;
+      if (docForChat?.text) {
+        agentText = `[Document context — "${docForChat.filename}" — answer from this document only, do not search the web]\n${docForChat.text.slice(0, 1500)}\n\n---\n\n${trimmed}`;
+      }
+
+      // ── Web search guard ───────────────────────────────────────────────────
+      // Deterministic code-level check: only allow WEB_SEARCH when the user
+      // explicitly signals they want it. Appending this instruction is more
+      // reliable than relying on the character file alone with small models.
+      const SEARCH_SIGNAL_RE = /\b(search|look up|lookup|google|find online|find on the web|internet|browse|current|latest|news|today'?s?)\b/i;
+      if (!SEARCH_SIGNAL_RE.test(trimmed)) {
+        agentText = `${agentText}\n\n[System: Answer from your existing context and knowledge. Do not use WEB_SEARCH.]`;
+      }
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -1199,13 +1471,25 @@ export function ChatDrawer({
             ))}
           </div>
         </div>
-        <button
-          onClick={onClose}
-          className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
-          aria-label="Close chat"
-        >
-          <X size={16} />
-        </button>
+        <div className="flex items-center gap-1">
+          {!inDraftMode && (
+            <button
+              onClick={handleNewChat}
+              className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+              aria-label="New chat"
+              title="New chat"
+            >
+              <RotateCcw size={15} />
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+            aria-label="Close chat"
+          >
+            <X size={16} />
+          </button>
+        </div>
       </div>
 
       {/* Draft mode: top Send Email action bar */}
@@ -1277,7 +1561,7 @@ export function ChatDrawer({
         )}
 
         {messages.length === 0 && !isLoading ? (
-          <div className="flex h-full flex-col items-center justify-center text-center">
+          <div className="flex h-full flex-col items-center justify-center text-center px-2">
             <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50">
               <MessageSquare size={22} className="text-indigo-400" />
             </div>
@@ -1289,13 +1573,62 @@ export function ChatDrawer({
         ) : (
           <div className="flex flex-col gap-3">
             {messages.map((msg, i) => (
-              <MessageBubble
-                key={i}
-                msg={msg}
-                onUseDraft={inDraftMode ? handleUseDraft : undefined}
-              />
+              <div key={i}>
+                <MessageBubble
+                  msg={msg}
+                  onUseDraft={inDraftMode ? handleUseDraft : undefined}
+                />
+                {msg.docChips && !inlineEmailDraft && (
+                  <DocActionChips
+                    doc={msg.docChips}
+                    onEmail={handleDocEmail}
+                  />
+                )}
+              </div>
             ))}
+            {/* Suggestion chips — shown after welcome message, before user sends anything */}
+            {!emailDraft && !conflictContext && messages.length === 1 && messages[0].role === "agent" && !isLoading && (
+              <div className="flex flex-col gap-1.5 px-1">
+                {[
+                  { label: "📬 Check my emails",          prompt: "check my emails" },
+                  { label: "📅 Any calendar conflicts?",   prompt: "detect conflicts" },
+                  { label: "🔁 Who hasn't replied?",       prompt: "check my follow-ups" },
+                  { label: "🧭 Prepare me for a meeting",  prompt: "prepare me for my next meeting" },
+                  { label: "🔍 Search the web",            prompt: "search for " },
+                ].map(({ label, prompt }) => (
+                  <button
+                    key={label}
+                    onClick={() => {
+                      if (prompt.endsWith(" ")) {
+                        setInput(prompt);
+                        setTimeout(() => textareaRef.current?.focus(), 50);
+                      } else {
+                        void sendToAgent(prompt);
+                      }
+                    }}
+                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-left text-xs text-gray-600 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 active:scale-[0.98]"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
             {isLoading && <ThinkingDots />}
+            {inlineEmailDraft && (
+              <InlineEmailSend
+                draft={inlineEmailDraft}
+                userDisplayName={userDisplayName}
+                onSent={(to) => {
+                  setInlineEmailDraft(null);
+                  setMessages((prev) => [
+                    ...prev,
+                    { role: "agent" as const, text: `Email sent to ${to}.`, ts: new Date() },
+                  ]);
+                  onQueueRefresh?.();
+                }}
+                onDiscard={() => setInlineEmailDraft(null)}
+              />
+            )}
             {calendarOffer && (
               <CalendarOfferPanel
                 offer={calendarOffer}
@@ -1355,7 +1688,57 @@ export function ChatDrawer({
           </div>
         )}
 
+        {/* Attached document badge */}
+        {attachedDoc && (
+          <div className="mb-2 flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs text-indigo-700">
+            <FileText size={11} />
+            <span className="flex-1 truncate">{attachedDoc.filename}</span>
+            <button
+              onClick={() => setAttachedDoc(null)}
+              className="ml-1 text-indigo-400 hover:text-indigo-600"
+              aria-label="Remove document"
+            >
+              <X size={10} />
+            </button>
+          </div>
+        )}
+
         <div className="flex items-end gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 transition-all focus-within:border-indigo-300 focus-within:ring-2 focus-within:ring-indigo-100">
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void handleFileUpload(file);
+            }}
+          />
+          {/* Paperclip upload button — visible only in normal chat mode, not draft mode */}
+          {!inDraftMode && (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploadingDoc || isLoading || !agentId}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Upload PDF"
+              title="Upload a PDF document"
+            >
+              {isUploadingDoc ? (
+                <span className="inline-flex items-center gap-0.5">
+                  {[0, 1, 2].map((i) => (
+                    <span
+                      key={i}
+                      className="h-1 w-1 rounded-full bg-gray-400 animate-bounce"
+                      style={{ animationDelay: `${i * 150}ms` }}
+                    />
+                  ))}
+                </span>
+              ) : (
+                <Paperclip size={14} />
+              )}
+            </button>
+          )}
           <textarea
             ref={textareaRef}
             value={input}

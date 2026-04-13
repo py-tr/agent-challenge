@@ -49,6 +49,67 @@ interface ExtractedEvent {
   timeZone?: string;     // IANA, e.g. "America/New_York"
 }
 
+// ─── Date/time context builder ────────────────────────────────────────────────
+
+/**
+ * Pre-compute all relative date references so the small LLM never has to
+ * do calendar arithmetic itself. Returns a multi-line string to inject into
+ * the prompt and a lookup map for validation.
+ */
+function buildDateTimeContext(now: Date): string {
+  const pad  = (n: number) => String(n).padStart(2, "0");
+  const ymd  = (d: Date)   => d.toISOString().slice(0, 10);
+  const hm   = (d: Date)   => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+  const DAY_NAMES = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+  const todayIdx  = now.getDay();
+
+  // next occurrence of each weekday (same day = 7 days forward, not 0)
+  const nextDay = (targetIdx: number): Date => {
+    const d = new Date(now);
+    let delta = targetIdx - todayIdx;
+    if (delta <= 0) delta += 7;
+    d.setDate(d.getDate() + delta);
+    return d;
+  };
+
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  // Relative time helpers
+  const inHours = (h: number): { date: string; time: string } => {
+    const d = new Date(now.getTime() + h * 3_600_000);
+    return { date: ymd(d), time: hm(d) };
+  };
+
+  const lines: string[] = [
+    `=== DATE/TIME REFERENCE (use these exact values — do NOT compute yourself) ===`,
+    `today        = ${ymd(now)}  (${DAY_NAMES[todayIdx]})`,
+    `tomorrow     = ${ymd(tomorrow)}`,
+    ``,
+    `--- Next occurrence of each weekday ---`,
+    ...DAY_NAMES.map((name, i) => `${name.padEnd(12)} = ${ymd(nextDay(i))}`),
+    ``,
+    `--- Relative times from NOW (${hm(now)}) ---`,
+    `in 1 hour    = ${inHours(1).date} ${inHours(1).time}`,
+    `in 2 hours   = ${inHours(2).date} ${inHours(2).time}`,
+    `in 3 hours   = ${inHours(3).date} ${inHours(3).time}`,
+    `in 30 min    = ${inHours(0.5).date} ${inHours(0.5).time}`,
+    ``,
+    `--- Time-of-day defaults ---`,
+    `morning      = 09:00`,
+    `noon / lunch = 12:00`,
+    `afternoon    = 14:00`,
+    `evening      = 18:00`,
+    `night        = 20:00`,
+    `=== END REFERENCE ===`,
+  ];
+
+  return lines.join("\n");
+}
+
+// ─── LLM extraction ───────────────────────────────────────────────────────────
+
 /**
  * Ask the LLM to extract structured event details from the user's message.
  * Returns null if the model can't produce a valid JSON object.
@@ -57,25 +118,28 @@ async function extractEventDetails(
   runtime: IAgentRuntime,
   userText: string
 ): Promise<ExtractedEvent | null> {
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const now = new Date();
+  const dateCtx = buildDateTimeContext(now);
 
   const prompt =
-    `Today is ${today}. Extract calendar event details from the user's request and return ONLY a JSON object with these fields:\n` +
+    `${dateCtx}\n\n` +
+    `Extract calendar event details from the user's request and return ONLY a JSON object:\n` +
     `{\n` +
     `  "title": string,\n` +
     `  "date": "YYYY-MM-DD",\n` +
     `  "startTime": "HH:MM",\n` +
     `  "durationMinutes": number (default 60),\n` +
     `  "location": string | null,\n` +
-    `  "attendees": string[] (email addresses, may be empty),\n` +
-    `  "timeZone": string | null (IANA timezone if mentioned, otherwise null)\n` +
+    `  "attendees": string[] (email addresses only, may be empty),\n` +
+    `  "timeZone": string | null (IANA timezone only if explicitly mentioned)\n` +
     `}\n\n` +
     `User request: "${userText}"\n\n` +
-    `Rules:\n` +
-    `- "tomorrow" = ${new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)}\n` +
-    `- "morning" = 09:00, "noon" = 12:00, "afternoon" = 14:00, "evening" = 18:00\n` +
-    `- Next weekday resolves relative to today (${today})\n` +
-    `- Return ONLY raw JSON, no markdown fences, no extra text.\n`;
+    `CRITICAL rules:\n` +
+    `- Use the EXACT dates from the reference table above. Never compute day names yourself.\n` +
+    `- "Thursday" → use the thursday value from the table, not any other date.\n` +
+    `- "in 2 hours" → use the "in 2 hours" value from the table.\n` +
+    `- "postpone X hours" or "X hours later" → add X hours to the stated/implied start time.\n` +
+    `- Return ONLY raw JSON. No markdown, no explanation.\n`;
 
   let raw: string;
   try {

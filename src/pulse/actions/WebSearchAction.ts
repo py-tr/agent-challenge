@@ -284,9 +284,12 @@ export const webSearchAction: Action = {
   name: "WEB_SEARCH",
 
   description:
-    "Search the web for current information. Routes weather queries to wttr.in (real-time), " +
-    "factual queries to DuckDuckGo Instant Answers, and falls back to DuckDuckGo HTML scraping " +
-    "for live web results. No API keys required — runs on any Nosana node.",
+    "Fetch NEW real-time information from the web: weather for a specific city, current news, " +
+    "live prices, or factual lookups. Use ONLY when the user explicitly requests external data " +
+    "that is NOT already in the conversation. " +
+    "DO NOT use for analysis, recommendations, or reasoning about data already provided — " +
+    "e.g. 'which day is best?', 'should I bring an umbrella?', 'what do you think?' after weather " +
+    "was already fetched. Those should use REPLY.",
 
   similes: [
     "SEARCH",
@@ -301,15 +304,35 @@ export const webSearchAction: Action = {
   examples: [
     [
       { name: "user", content: { text: "What's the weather in Prague tomorrow?" } },
-      { name: "Pulse", content: { text: "[searches wttr.in] Partly cloudy, 14°C high. Light rain in the afternoon." } },
+      { name: "Pulse", content: { text: "[searches wttr.in] Partly cloudy, high around 12°C. Light rain in the afternoon." } },
     ],
     [
       { name: "user", content: { text: "Search for Nosana network" } },
       { name: "Pulse", content: { text: "[searches web] Nosana is a decentralized GPU compute network on Solana…" } },
     ],
+    [
+      // Negative example: analysis question after data is already in context → REPLY, no search
+      { name: "user", content: { text: "Which day would be best for golf?" } },
+      { name: "Pulse", content: { text: "Based on the forecast already provided: [day with best conditions] looks best. [rainy day] has precipitation — avoid it." } },
+    ],
+    [
+      // Negative example: follow-up reasoning → REPLY, no search
+      { name: "user", content: { text: "Should I bring an umbrella?" } },
+      { name: "Pulse", content: { text: "Based on the forecast: [day] has rain. Bring one if you're going out then." } },
+    ],
   ],
 
-  validate: async (): Promise<boolean> => true,
+  validate: async (_runtime: IAgentRuntime, message: Memory): Promise<boolean> => {
+    const text = typeof message.content === "string"
+      ? message.content
+      : (message.content as { text?: string })?.text ?? "";
+    // Reject pure reasoning/analysis questions — let REPLY handle those from context
+    const REASONING_RE = /^(which|what'?s?\s+(the\s+)?(best|better|worst)|should\s+i|would\s+you|based\s+on|given\s+(that|the)|considering|recommend)/i;
+    if (REASONING_RE.test(text.trim())) return false;
+    // Must contain a search-worthy term
+    const SEARCH_RE = /weather|forecast|temperature|search|find|look\s+up|what\s+is|who\s+is|current|latest|news|price|how\s+(much|many|does|did)|when\s+(did|was|is)/i;
+    return SEARCH_RE.test(text);
+  },
 
   handler: async (
     _runtime: IAgentRuntime,

@@ -24,8 +24,14 @@ Pulse runs on a Nosana GPU node, processes your Gmail and Google Calendar on a s
 | **Decision Memory** | Every approve/reject is stored. After 10+ decisions, Pulse surfaces your patterns: *"You approve 87% of email drafts, reject 60% of reschedule suggestions."* |
 | **Approval Queue** | Every proposed action sits in queue until you explicitly approve it. Email drafts, calendar reschedules, follow-up reminders — nothing executes automatically. |
 | **Calendar Conflict Detection** | Finds overlapping events. Proposes a resolution. You pick which one moves. |
-| **Real-Time Web Search** | `WebSearchProvider` injects live weather and factual data into LLM context *before* generation — no hallucination, no fabricated forecasts. Routes weather to wttr.in, general queries to DuckDuckGo. |
-| **Morning Briefing** | On startup, Pulse posts a prioritized briefing of pending queue items to the chat. P1 first, everything else ranked below. |
+| **Real-Time Web Search** | `WebSearchProvider` injects live web data into LLM context *before* generation. Only activates when you explicitly ask to search — e.g. "search for X" or "look up Y online". Routes weather to wttr.in, general queries to DuckDuckGo. |
+| **PDF Document Upload** | Attach any PDF in the chat. Pulse extracts the text server-side, runs a structured LLM analysis (summary, action items, deadlines, risks), and injects doc context into follow-up questions. Say "send the summary to x@y.com" — an LLM intent classifier detects the request and drafts the email automatically. |
+| **Morning Briefing + Voice** | On startup, Pulse posts a prioritized briefing of pending queue items. Hit "Listen" to hear it read aloud via the Web Speech API. |
+| **Follow-Up Detection** | Scans your SENT folder for emails with no reply in 3+ days. Creates follow_up queue items so nothing slips through. |
+| **Meeting Prep** | `"prepare me for the Q2 review"` — Pulse finds the event, pulls recent email threads with attendees, and generates a 5-8 bullet prep brief. |
+| **AI Email Summaries** | Every email draft card auto-fetches a 1-2 sentence AI summary. No clicking into the thread — the key ask is surfaced immediately. |
+| **Analytics** | 7-day bar chart (approved vs rejected), per-type approval rates, and summary cards. Visualizes your decision patterns over time. |
+| **Focus Mode** | One item at a time, full-screen. Keyboard-friendly: approve / reject / dismiss. Zero distraction when inbox is overwhelming. |
 
 ---
 
@@ -43,7 +49,8 @@ src/pulse/
 │   ├── MorningBriefingService.ts   # Service: startup briefing posted to chat
 │   └── DailySummaryService.ts      # Service: evening decision-pattern summary
 ├── evaluators/
-│   └── SlibGuardEvaluator.ts       # Evaluator (alwaysRun: true): scans every message
+│   ├── SlibGuardEvaluator.ts       # Evaluator (alwaysRun: true): scans every message for commitments
+│   └── WeatherContextEvaluator.ts  # Evaluator: caches weather data so follow-ups skip re-search
 ├── providers/
 │   ├── ActionQueueProvider.ts      # Provider: injects pending queue into every LLM prompt
 │   ├── DecisionHistoryProvider.ts  # Provider: last 10 decisions + approval-rate patterns
@@ -51,6 +58,8 @@ src/pulse/
 ├── actions/
 │   ├── ProcessEmailsAction.ts      # Action: manually trigger Gmail processing
 │   ├── DetectConflictsAction.ts    # Action: manually trigger calendar scan
+│   ├── DetectFollowUpsAction.ts    # Action: scan SENT folder for no-reply threads
+│   ├── MeetingPrepAction.ts        # Action: generate meeting prep brief from Calendar + Gmail
 │   ├── WebSearchAction.ts          # Action: DuckDuckGo + wttr.in, no API key required
 │   └── CreateCalendarEventAction.ts # Action: create Google Calendar events via chat
 ├── routes/
@@ -65,9 +74,9 @@ src/pulse/
 
 - **5 Services** — background processing, MCP clients, morning briefing, evening summary
 - **3 Providers** — queue state, decision history, and live web data injected into every prompt
-- **1 Evaluator** — `alwaysRun: true`, fires on every message to detect commitment language
-- **4 Actions** — email processing, conflict detection, web search, calendar event creation
-- **REST Routes** — full CRUD API for the React dashboard
+- **2 Evaluators** — `SlibGuardEvaluator` (alwaysRun: true, commitment detection) + `WeatherContextEvaluator` (caches weather data for follow-up questions without re-searching)
+- **6 Actions** — email processing, conflict detection, follow-up detection, meeting prep, web search, calendar event creation
+- **REST Routes** — full CRUD API for the React dashboard, plus direct LLM endpoints (`/pulse/draft-assist`, `/pulse/classify-intent`, `/pulse/upload`) that bypass ElizaOS session overhead for latency-sensitive operations
 - **Custom model handler** — `priority: 1` overrides `plugin-openai` to POST directly to `/v1/chat/completions`, bypassing `@ai-sdk/openai`'s Responses API default (which Nosana nodes don't support)
 
 ---
@@ -99,6 +108,9 @@ Every successful LLM call increments a persistent counter via `nosanaMetrics.ts`
     "isNosanaNode": true,
     "llmCallCount": 47,
     "avgLatencyMs": 812,
+    "tokensPerSec": 94.3,
+    "totalTokensEstimated": 12400,
+    "estimatedCostUsd": 0.0004,
     "uptimeMs": 86400000,
     "jobType": "morning",
     "modelName": "Qwen3.5-27B-AWQ-4bit"
@@ -151,13 +163,34 @@ Open `http://localhost:5173` — the dashboard connects automatically.
 | `OPENAI_API_URL` | Yes | Nosana node endpoint, e.g. `https://<node>.nos.ci/v1` |
 | `OPENAI_SMALL_MODEL` | Yes | `Qwen3.5-27B-AWQ-4bit` |
 | `OPENAI_LARGE_MODEL` | Yes | `Qwen3.5-27B-AWQ-4bit` |
-| `GOOGLE_CLIENT_ID` | Yes | Google OAuth client ID |
-| `GOOGLE_CLIENT_SECRET` | Yes | Google OAuth client secret |
-| `GOOGLE_REFRESH_TOKEN` | Yes | Long-lived refresh token for Gmail + Calendar |
+| `GOOGLE_CLIENT_ID` | No | Google OAuth client ID — enables "Sign in with Google" button |
+| `GOOGLE_CLIENT_SECRET` | No | Google OAuth client secret |
+| `GOOGLE_REFRESH_TOKEN` | No | Long-lived refresh token (set directly to skip OAuth) |
+| `PULSE_PUBLIC_URL` | No | Public base URL for OAuth redirect (e.g. `https://your-node.nos.ci`) |
 | `SERVER_PORT` | No | Backend port (default: `3000`) |
 | `PULSE_JOB_TYPE` | No | `morning` or `evening` — controls which processing mode runs |
 | `PULSE_SEED_ON_START` | No | `true` to auto-seed demo data on first boot |
 | `EMBEDDING_PROVIDER` | No | Set to `none` — embeddings not used |
+
+### Google Authentication
+
+Pulse supports three ways to connect Google:
+
+1. **"Sign in with Google" button** — works on any deployment (local or Nosana) via a static OAuth relay hosted on GitHub Pages. Register **one** redirect URI in Google Cloud Console and it works everywhere:
+   ```
+   https://py-tr.github.io/agent-challenge/oauth-relay.html
+   ```
+   The relay receives the Google callback and forwards the auth code back to whichever Pulse instance started the flow (encoded in the OAuth `state` parameter).
+
+2. **Paste refresh token** — paste a refresh token directly into the setup banner. Useful when OAuth isn't configured. Token is saved to `.eliza/pulse-auth.json`.
+
+3. **`GOOGLE_REFRESH_TOKEN` env var** — set directly in `.env` or the Nosana job definition. Takes priority over the stored file.
+
+**One-time Google Cloud setup:**
+- Create an OAuth 2.0 Client ID at [console.cloud.google.com](https://console.cloud.google.com) → APIs & Services → Credentials
+- Add authorized redirect URI: `https://py-tr.github.io/agent-challenge/oauth-relay.html`
+- Enable Gmail API + Google Calendar API
+- Copy Client ID + Secret into `.env`
 
 ---
 
@@ -216,9 +249,10 @@ src/pulse/tests/persistence.test.ts       2 tests  DB migrations + CRUD round-tr
 │  │   ───────                ──────                ──                 │  │
 │  │   ProcessEmails          /pulse/queue          PGLite             │  │
 │  │   DetectConflicts        /pulse/approve        action_items       │  │
-│  │   WebSearch              /pulse/reject         commitments        │  │
-│  │   CreateCalendarEvent    /pulse/status         decisions          │  │
-│  │                          /pulse/decisions                         │  │
+│  │   DetectFollowUps        /pulse/reject         commitments        │  │
+│  │   MeetingPrep            /pulse/status         decisions          │  │
+│  │   WebSearch              /pulse/decisions                         │  │
+│  │   CreateCalendarEvent    /pulse/analytics                         │  │
 │  └────────────────────────────────────────────────────┬──────────────┘  │
 │                                                       │ :3000           │
 └───────────────────────────────────────────────────────┼─────────────────┘

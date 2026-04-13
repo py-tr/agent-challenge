@@ -3,8 +3,8 @@
  * Data comes from GET /pulse/briefing (MorningBriefingService cache).
  */
 
-import { useState } from "react";
-import { ChevronDown, ChevronUp, Calendar, Mail, Shield, Zap } from "lucide-react";
+import { useState, useRef } from "react";
+import { ChevronDown, ChevronUp, Calendar, Mail, Shield, Zap, Volume2, VolumeX } from "lucide-react";
 import type { BriefingData } from "../api/pulseApi";
 
 const TYPE_TAG: Record<string, string> = {
@@ -30,8 +30,78 @@ interface Props {
   loading: boolean;
 }
 
+function buildBriefingText(briefing: BriefingData): string {
+  const parts: string[] = [`Good morning. Here is your briefing for ${briefing.dateLabel}.`];
+
+  if (briefing.pendingItems.length > 0) {
+    parts.push(
+      `You have ${briefing.pendingItems.length} item${briefing.pendingItems.length !== 1 ? "s" : ""} pending in your queue.`
+    );
+    briefing.pendingItems.slice(0, 3).forEach((item) => {
+      parts.push(`Priority ${item.priority}: ${item.title}.`);
+    });
+  } else {
+    parts.push("Your queue is clear.");
+  }
+
+  if (briefing.todayEvents.length > 0) {
+    parts.push(
+      `Today you have ${briefing.todayEvents.length} calendar event${briefing.todayEvents.length !== 1 ? "s" : ""}.`
+    );
+    briefing.todayEvents.slice(0, 3).forEach((ev) => {
+      parts.push(ev.allDay ? `All day: ${ev.title}.` : `${ev.title}.`);
+    });
+  } else {
+    parts.push("No meetings scheduled today.");
+  }
+
+  if (briefing.urgentCommitments.length > 0) {
+    parts.push(
+      `You have ${briefing.urgentCommitments.length} commitment${briefing.urgentCommitments.length !== 1 ? "s" : ""} due soon.`
+    );
+    briefing.urgentCommitments.slice(0, 2).forEach((c) => {
+      parts.push(c.recipient ? `${c.text}, to ${c.recipient}.` : `${c.text}.`);
+    });
+  }
+
+  parts.push("That is all. Have a productive day.");
+  return parts.join(" ");
+}
+
 export function BriefingPanel({ briefing, loading }: Props) {
   const [collapsed, setCollapsed] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+
+  function toggleSpeech() {
+    if (!briefing) return;
+
+    if (speaking) {
+      window.speechSynthesis.cancel();
+      setSpeaking(false);
+      return;
+    }
+
+    const text = buildBriefingText(briefing);
+    const utter = new SpeechSynthesisUtterance(text);
+    // Briefing content is always English — pick an English voice regardless of
+    // browser locale so it doesn't sound garbled on non-English systems.
+    utter.lang = "en-US";
+    const voices = window.speechSynthesis.getVoices();
+    const enVoice =
+      voices.find((v) => v.lang === "en-US" && v.name.toLowerCase().includes("natural")) ??
+      voices.find((v) => v.lang === "en-US") ??
+      voices.find((v) => v.lang.startsWith("en")) ??
+      null;
+    if (enVoice) utter.voice = enVoice;
+    utter.rate = 1.05;
+    utter.pitch = 1;
+    utter.onend = () => setSpeaking(false);
+    utter.onerror = () => setSpeaking(false);
+    utteranceRef.current = utter;
+    window.speechSynthesis.speak(utter);
+    setSpeaking(true);
+  }
 
   if (loading) {
     return (
@@ -67,6 +137,20 @@ export function BriefingPanel({ briefing, loading }: Props) {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-indigo-400">as of {generatedTime}</span>
+          {"speechSynthesis" in window && (
+            <button
+              onClick={(e) => { e.stopPropagation(); toggleSpeech(); }}
+              title={speaking ? "Stop briefing" : "Listen to briefing"}
+              className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                speaking
+                  ? "bg-indigo-200 text-indigo-700"
+                  : "text-indigo-400 hover:bg-indigo-100 hover:text-indigo-600"
+              }`}
+            >
+              {speaking ? <VolumeX size={11} /> : <Volume2 size={11} />}
+              {speaking ? "Stop" : "Listen"}
+            </button>
+          )}
           {collapsed
             ? <ChevronDown size={14} className="text-indigo-400" />
             : <ChevronUp size={14} className="text-indigo-400" />

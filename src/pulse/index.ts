@@ -23,9 +23,12 @@ import { MorningBriefingService } from "./services/MorningBriefingService.js";
 import { DailySummaryService } from "./services/DailySummaryService.js";
 import { processEmailsAction } from "./actions/ProcessEmailsAction.js";
 import { detectConflictsAction } from "./actions/DetectConflictsAction.js";
+import { detectFollowUpsAction } from "./actions/DetectFollowUpsAction.js";
 import { webSearchAction } from "./actions/WebSearchAction.js";
 import { createCalendarEventAction } from "./actions/CreateCalendarEventAction.js";
+import { meetingPrepAction } from "./actions/MeetingPrepAction.js";
 import { slibGuardEvaluator } from "./evaluators/SlibGuardEvaluator.js";
+import { weatherContextEvaluator } from "./evaluators/WeatherContextEvaluator.js";
 import { pulseRoutes } from "./routes/pulseRoutes.js";
 import { actionQueueProvider } from "./providers/ActionQueueProvider.js";
 import { decisionHistoryProvider } from "./providers/DecisionHistoryProvider.js";
@@ -103,10 +106,12 @@ async function callChatCompletions(
     choices: Array<{ message: { content: string } }>;
   };
 
-  // Track every successful inference: count + wall-clock latency for the GPU panel.
-  recordLlmCall(Date.now() - requestStart);
+  const result = data.choices[0]?.message?.content ?? "";
 
-  return data.choices[0]?.message?.content ?? "";
+  // Track every successful inference: count, latency, and response length for the GPU panel.
+  recordLlmCall(Date.now() - requestStart, result.length);
+
+  return result;
 }
 
 // ─── Plugin ───────────────────────────────────────────────────────────────────
@@ -141,6 +146,13 @@ export const pulsePlugin: Plugin = {
         "Qwen3.5-27B-AWQ-4bit";
       return callChatCompletions(runtime, model, params as ChatCompletionsParams);
     },
+    // No-op embedding handler — overrides plugin-openai (priority 0) which calls
+    // /v1/embeddings, an endpoint Nosana nodes don't expose (returns 404).
+    // Returns a 1536-dimensional zero vector so ElizaOS's ensureEmbeddingDimension
+    // check passes without making any HTTP calls.
+    [ModelType.TEXT_EMBEDDING]: async (_runtime: IAgentRuntime, _params) => {
+      return new Array(1536).fill(0) as number[];
+    },
   },
 
   // ── Services ────────────────────────────────────────────────────────────────
@@ -152,13 +164,13 @@ export const pulsePlugin: Plugin = {
 
   // ── Actions ─────────────────────────────────────────────────────────────────
   // webSearchAction: DuckDuckGo Instant Answer — no API key, runs on Nosana node.
-  actions: [processEmailsAction, detectConflictsAction, webSearchAction, createCalendarEventAction],
+  actions: [processEmailsAction, detectConflictsAction, detectFollowUpsAction, meetingPrepAction, webSearchAction, createCalendarEventAction],
 
   // ── Providers ────────────────────────────────────────────────────────────────
   providers: [actionQueueProvider, decisionHistoryProvider, webSearchProvider],
 
   // ── Evaluators ───────────────────────────────────────────────────────────────
-  evaluators: [slibGuardEvaluator],
+  evaluators: [slibGuardEvaluator, weatherContextEvaluator],
 
   // ── Routes ───────────────────────────────────────────────────────────────────
   routes: pulseRoutes,

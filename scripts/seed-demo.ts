@@ -10,10 +10,10 @@
  *    enforces a single-writer-per-directory constraint.
  *
  * What gets seeded:
- *   • 5 action items in the pending queue (all four types represented, varied
- *     priorities and ages)
- *   • 3 historical decisions (2 approved, 1 rejected) with linked items so the
- *     DecisionHistory panel shows realistic pattern data
+ *   • 8 pending action items (2 of each type: email_draft, conflict_resolution,
+ *     slib_reminder, follow_up) — varied priorities and ages
+ *   • 8 historical decisions spread across the last 7 days so the Analytics
+ *     chart and approval-rate breakdown both have data to display
  */
 
 import { fileURLToPath } from "node:url";
@@ -42,8 +42,11 @@ function hoursAgo(n: number): string {
 
 // ─── Seed Data ────────────────────────────────────────────────────────────────
 
+const tomorrow = new Date(Date.now() + 1 * 86_400_000).toISOString().slice(0, 10);
+const in10days = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
+
 const PENDING_ITEMS = [
-  // Highest priority: calendar conflict detected this morning
+  // ── conflict_resolution × 2 ─────────────────────────────────────────────
   {
     id:        crypto.randomUUID(),
     type:      "conflict_resolution",
@@ -52,44 +55,36 @@ const PENDING_ITEMS = [
       "Two events overlap on Thursday at 14:00–15:00:\n\n" +
       "• Q2 Business Review (14:00–15:30) — org-wide, you are a presenter\n" +
       "• Sarah 1:1 (14:00–15:00) — recurring weekly\n\n" +
-      "Suggested resolution: reschedule the 1:1 to Thursday 15:30 or Friday 10:00. " +
-      "Sarah has both slots free.",
+      "Suggested resolution: reschedule the 1:1 to Thursday 15:30 or Friday 10:00.\n\n" +
+      "**Approve** to acknowledge, or **Reject** to dismiss.",
     metadata:  JSON.stringify({
-      eventAId:    "cal-ev-001",
-      eventBId:    "cal-ev-002",
-      eventATitle: "Q2 Business Review",
-      eventBTitle: "Sarah 1:1",
-      eventAStart: "2026-04-17T14:00:00",
-      eventAEnd:   "2026-04-17T15:30:00",
-      eventBStart: "2026-04-17T14:00:00",
-      eventBEnd:   "2026-04-17T15:00:00",
-      overlapMinutes: 60,
-      date:        "2026-04-17",
+      eventAId: "cal-ev-001", eventATitle: "Q2 Business Review",
+      eventBId: "cal-ev-002", eventBTitle: "Sarah 1:1",
+      eventAStart: "2026-04-17T14:00:00", eventAEnd: "2026-04-17T15:30:00",
+      eventBStart: "2026-04-17T14:00:00", eventBEnd: "2026-04-17T15:00:00",
+      overlapMinutes: 60, date: "2026-04-17",
     }),
     status:    "pending",
     priority:  1,
     createdAt: hoursAgo(2),
     decidedAt: null,
   },
-
-  // Slib Guard reminder: commitment about to be missed
   {
     id:        crypto.randomUUID(),
-    type:      "slib_reminder",
-    title:     "Slib Guard: proposal for Mark due tomorrow",
+    type:      "conflict_resolution",
+    title:     "Calendar conflict: Team stand-up ↔ Investor call (Mon 9am)",
     body:
-      "In your email to Mark (3 days ago) you wrote:\n\n" +
-      "  \"I'll send over the updated pricing proposal by end of week.\"\n\n" +
-      "Tomorrow is Friday and no follow-up has been sent. " +
-      "Pulse drafted a follow-up below — approve to send.\n\n" +
-      "---\n" +
-      "Hi Mark,\n\nHere's the updated pricing proposal we discussed. " +
-      "Let me know if you have any questions.\n\n[attachment: proposal-v2.pdf]",
+      "Two events overlap on Monday at 09:00–09:30:\n\n" +
+      "• Daily Team Stand-up (09:00–09:15) — recurring daily\n" +
+      "• Investor Call with VC Partners (09:00–10:00) — high priority\n\n" +
+      "Suggested resolution: skip the stand-up on Monday — investor call cannot be moved.\n\n" +
+      "**Approve** to acknowledge, or **Reject** to dismiss.",
     metadata:  JSON.stringify({
-      sourceMessageId: "gmail-msg-abc123",
-      recipient:       "Mark",
-      deadline:        "2026-04-11",
-      remindAt:        hoursAgo(1),
+      eventAId: "cal-ev-003", eventATitle: "Daily Stand-up",
+      eventBId: "cal-ev-004", eventBTitle: "Investor Call",
+      eventAStart: "2026-04-14T09:00:00", eventAEnd: "2026-04-14T09:15:00",
+      eventBStart: "2026-04-14T09:00:00", eventBEnd: "2026-04-14T10:00:00",
+      overlapMinutes: 15, date: "2026-04-14",
     }),
     status:    "pending",
     priority:  2,
@@ -97,110 +92,193 @@ const PENDING_ITEMS = [
     decidedAt: null,
   },
 
-  // Email draft: follow-up after no reply
-  {
-    id:        crypto.randomUUID(),
-    type:      "follow_up",
-    title:     "Follow-up: Elena hasn't replied in 5 days",
-    body:
-      "You emailed Elena on April 3rd about the design review brief. " +
-      "No reply has been received (5 days).\n\n" +
-      "Pulse drafted a gentle follow-up:\n\n" +
-      "---\n" +
-      "Hi Elena,\n\nJust checking in — did you get a chance to look at the " +
-      "design review brief I sent last week? Happy to jump on a quick call " +
-      "if that's easier.\n\nBest,",
-    metadata:  JSON.stringify({
-      threadId:      "gmail-thread-def456",
-      originalDate:  "2026-04-03T09:15:00",
-      recipientName: "Elena",
-    }),
-    status:    "pending",
-    priority:  4,
-    createdAt: daysAgo(1),
-    decidedAt: null,
-  },
-
-  // Email draft: outbound from Pulse
-  {
-    id:        crypto.randomUUID(),
-    type:      "email_draft",
-    title:     "Draft: reply to James re: onboarding timeline",
-    body:
-      "James emailed asking for an updated onboarding timeline for the new " +
-      "contractor. Pulse drafted a reply based on your calendar availability:\n\n" +
-      "---\n" +
-      "Hi James,\n\nThanks for reaching out. We have onboarding slots available " +
-      "on April 14 (10am–12pm) and April 16 (2pm–4pm). " +
-      "Let me know which works for your team and I'll send a calendar invite.\n\nBest,",
-    metadata:  JSON.stringify({
-      threadId:    "gmail-thread-ghi789",
-      replyTo:     "james@example.com",
-      subject:     "Re: Onboarding timeline for Alex",
-    }),
-    status:    "pending",
-    priority:  5,
-    createdAt: daysAgo(2),
-    decidedAt: null,
-  },
-
-  // Low-priority: Slib Guard reminder far in the future but surfaced early
+  // ── slib_reminder × 2 ───────────────────────────────────────────────────
   {
     id:        crypto.randomUUID(),
     type:      "slib_reminder",
-    title:     "Slib Guard: send budget forecast to Finance by Apr 18",
+    title:     "Slib Guard: pricing proposal for Mark due tomorrow",
+    body:
+      "In your email to Mark (3 days ago) you wrote:\n\n" +
+      "  \"I'll send over the updated pricing proposal by end of week.\"\n\n" +
+      "Tomorrow is Friday and no follow-up has been sent.\n\n" +
+      "**Approve** to confirm on track, or **Reject** to dismiss.",
+    metadata:  JSON.stringify({
+      commitmentId: "commitment-seed-001",
+      recipient: "Mark",
+      deadline: tomorrow,
+      verbatim: "I'll send over the updated pricing proposal by end of week.",
+    }),
+    status:    "pending",
+    priority:  2,
+    createdAt: hoursAgo(3),
+    decidedAt: null,
+  },
+  {
+    id:        crypto.randomUUID(),
+    type:      "slib_reminder",
+    title:     "Slib Guard: Q2 budget forecast for Finance by Apr 18",
     body:
       "Detected in your email to Anna (Finance):\n\n" +
       "  \"I'll have the Q2 budget forecast ready by April 18.\"\n\n" +
-      "Deadline is in 10 days. No action required yet, but this reminder " +
-      "is here so it doesn't slip through the cracks.",
+      `Deadline is ${in10days}. Flagged early so it doesn't slip.\n\n` +
+      "**Approve** to confirm on track, or **Reject** to dismiss.",
     metadata:  JSON.stringify({
-      sourceMessageId: "gmail-msg-jkl012",
-      recipient:       "Anna",
-      deadline:        "2026-04-18",
+      commitmentId: "commitment-seed-002",
+      recipient: "Anna",
+      deadline: in10days,
+      verbatim: "I'll have the Q2 budget forecast ready by April 18.",
     }),
     status:    "pending",
     priority:  7,
     createdAt: daysAgo(3),
     decidedAt: null,
   },
-] as const;
 
-// Items for the 3 historical decisions (already resolved)
-const HISTORICAL_ITEMS = [
+  // ── follow_up × 2 ───────────────────────────────────────────────────────
   {
     id:        crypto.randomUUID(),
-    type:      "email_draft",
-    title:     "Draft: reply to client NDA enquiry",
-    body:      "(approved and sent)",
-    metadata:  null,
-    status:    "approved",
+    type:      "follow_up",
+    title:     "No reply: \"Design review brief\" (5 days)",
+    body:
+      "You sent this email 5 days ago and haven't received a reply.\n\n" +
+      "**To:** Elena <elena@design.co>\n" +
+      "**Subject:** Design review brief for Q2 campaign\n\n" +
+      "Should Pulse draft a follow-up nudge?\n\n" +
+      "**Approve** to mark handled, or **Reject** to dismiss.",
+    metadata:  JSON.stringify({
+      gmailThreadId: "gmail-thread-def456",
+      gmailMessageId: "gmail-msg-def456",
+      subject: "Design review brief for Q2 campaign",
+      sentDate: daysAgo(5),
+      daysWithoutReply: 5,
+    }),
+    status:    "pending",
     priority:  3,
-    createdAt: daysAgo(5),
-    decidedAt: daysAgo(4),
-  },
-  {
-    id:        crypto.randomUUID(),
-    type:      "conflict_resolution",
-    title:     "Calendar conflict: All-hands ↔ Dentist appointment",
-    body:      "(approved and sent)",
-    metadata:  null,
-    status:    "approved",
-    priority:  2,
-    createdAt: daysAgo(7),
-    decidedAt: daysAgo(7),
+    createdAt: daysAgo(1),
+    decidedAt: null,
   },
   {
     id:        crypto.randomUUID(),
     type:      "follow_up",
-    title:     "Follow-up: vendor pricing request",
-    body:      "(rejected — not needed)",
-    metadata:  null,
-    status:    "rejected",
-    priority:  6,
-    createdAt: daysAgo(10),
-    decidedAt: daysAgo(9),
+    title:     "No reply: \"Partnership opportunity\" (9 days)",
+    body:
+      "You sent this email 9 days ago and haven't received a reply.\n\n" +
+      "**To:** David <david@partnerfirm.io>\n" +
+      "**Subject:** Partnership opportunity — intro\n\n" +
+      "This thread has been silent for over a week. Should Pulse draft a follow-up?\n\n" +
+      "**Approve** to mark handled, or **Reject** to dismiss.",
+    metadata:  JSON.stringify({
+      gmailThreadId: "gmail-thread-ghi999",
+      gmailMessageId: "gmail-msg-ghi999",
+      subject: "Partnership opportunity — intro",
+      sentDate: daysAgo(9),
+      daysWithoutReply: 9,
+    }),
+    status:    "pending",
+    priority:  2,
+    createdAt: daysAgo(2),
+    decidedAt: null,
   },
+
+  // ── email_draft × 2 ─────────────────────────────────────────────────────
+  {
+    id:        crypto.randomUUID(),
+    type:      "email_draft",
+    title:     "Draft: reply to James re: onboarding timeline",
+    body:
+      "**From:** James <james@example.com>\n" +
+      "**Subject:** Onboarding timeline for Alex\n\n" +
+      "**Their message:**\n" +
+      "Hi, could you confirm the onboarding schedule for the new contractor? " +
+      "We need to book travel by Friday.\n\n" +
+      "---\n\n" +
+      "**Suggested reply scaffold:**\n\n" +
+      "Hi James,\n\nThanks for reaching out. We have onboarding slots available " +
+      "on April 14 (10am–12pm) and April 16 (2pm–4pm). " +
+      "Let me know which works for your team and I'll send a calendar invite.\n\nBest,\n\n" +
+      "---\n\n" +
+      "**Approve** to mark handled. To send, ask Pulse: _\"Draft a reply to James\"_",
+    metadata:  JSON.stringify({
+      gmailMessageId: "gmail-thread-ghi789",
+      from: "James <james@example.com>",
+      subject: "Onboarding timeline for Alex",
+      date: daysAgo(2),
+      category: "action-required",
+    }),
+    status:    "pending",
+    priority:  5,
+    createdAt: daysAgo(2),
+    decidedAt: null,
+  },
+  {
+    id:        crypto.randomUUID(),
+    type:      "email_draft",
+    title:     "Draft: reply to Lisa re: contract renewal terms",
+    body:
+      "**From:** Lisa <lisa@legalpartners.com>\n" +
+      "**Subject:** Contract renewal — terms for review\n\n" +
+      "**Their message:**\n" +
+      "Please find the updated contract renewal terms attached. " +
+      "We'd like to schedule a call to walk through section 4.2 before signing.\n\n" +
+      "---\n\n" +
+      "**Suggested reply scaffold:**\n\n" +
+      "Hi Lisa,\n\nThank you for sending the updated terms. I've reviewed section 4.2 " +
+      "and have a few questions. I'm available for a call on Thursday 2–4pm or Friday " +
+      "10am–12pm — please let me know what works.\n\nBest,\n\n" +
+      "---\n\n" +
+      "**Approve** to mark handled. To send, ask Pulse: _\"Draft a reply to Lisa\"_",
+    metadata:  JSON.stringify({
+      gmailMessageId: "gmail-thread-jkl321",
+      from: "Lisa <lisa@legalpartners.com>",
+      subject: "Contract renewal — terms for review",
+      date: daysAgo(1),
+      category: "action-required",
+    }),
+    status:    "pending",
+    priority:  4,
+    createdAt: daysAgo(1),
+    decidedAt: null,
+  },
+] as const;
+
+// 8 historical decisions spread across the last 7 days
+const HISTORICAL_ITEMS = [
+  // Day 6
+  { id: crypto.randomUUID(), type: "email_draft",
+    title: "Draft: reply to client NDA enquiry", body: "(approved and sent)",
+    metadata: null, status: "approved", priority: 3, createdAt: daysAgo(6), decidedAt: daysAgo(6),
+    decision: "approved" as const, reason: null },
+  { id: crypto.randomUUID(), type: "follow_up",
+    title: "No reply: \"Vendor pricing request\" (7 days)", body: "(rejected — vendor responded via phone)",
+    metadata: null, status: "rejected", priority: 5, createdAt: daysAgo(6), decidedAt: daysAgo(6),
+    decision: "rejected" as const, reason: "Vendor responded via phone" },
+  // Day 4
+  { id: crypto.randomUUID(), type: "conflict_resolution",
+    title: "Calendar conflict: All-hands ↔ Dentist appointment", body: "(approved — dentist rescheduled)",
+    metadata: null, status: "approved", priority: 2, createdAt: daysAgo(4), decidedAt: daysAgo(4),
+    decision: "approved" as const, reason: null },
+  { id: crypto.randomUUID(), type: "slib_reminder",
+    title: "Slib Guard: slide deck to Tom by last Friday", body: "(approved — sent on time)",
+    metadata: null, status: "approved", priority: 3, createdAt: daysAgo(4), decidedAt: daysAgo(4),
+    decision: "approved" as const, reason: null },
+  // Day 2
+  { id: crypto.randomUUID(), type: "email_draft",
+    title: "Draft: reply to recruiter re: senior engineer role", body: "(rejected — not hiring)",
+    metadata: null, status: "rejected", priority: 6, createdAt: daysAgo(2), decidedAt: daysAgo(2),
+    decision: "rejected" as const, reason: "Not actively hiring for this role" },
+  { id: crypto.randomUUID(), type: "follow_up",
+    title: "No reply: \"Q1 report\" (4 days)", body: "(approved — follow-up sent)",
+    metadata: null, status: "approved", priority: 3, createdAt: daysAgo(2), decidedAt: daysAgo(2),
+    decision: "approved" as const, reason: null },
+  // Yesterday
+  { id: crypto.randomUUID(), type: "conflict_resolution",
+    title: "Calendar conflict: Design review ↔ Client lunch", body: "(rejected — overlap minor)",
+    metadata: null, status: "rejected", priority: 4, createdAt: daysAgo(1), decidedAt: daysAgo(1),
+    decision: "rejected" as const, reason: "Overlap is only 5 minutes, manageable" },
+  { id: crypto.randomUUID(), type: "slib_reminder",
+    title: "Slib Guard: intro email to new board member", body: "(approved — email sent)",
+    metadata: null, status: "approved", priority: 2, createdAt: daysAgo(1), decidedAt: daysAgo(1),
+    decision: "approved" as const, reason: null },
 ] as const;
 
 // ─── Runner ───────────────────────────────────────────────────────────────────
@@ -238,19 +316,18 @@ if (process.argv[1] === __filename) {
 
       // ── Insert historical items + decisions ───────────────────────────────
       for (const item of HISTORICAL_ITEMS) {
-        await db.insert(actionItems).values(item);
-
-        const decisionValue = item.status as "approved" | "rejected";
+        const { decision, reason, ...itemRow } = item;
+        await db.insert(actionItems).values(itemRow);
         await db.insert(decisions).values({
           id:           crypto.randomUUID(),
           actionItemId: item.id,
-          decision:     decisionValue,
-          reason:       decisionValue === "rejected" ? "Not needed at this time" : null,
+          decision,
+          reason,
           decidedAt:    item.decidedAt,
         });
 
         console.log(
-          `  ✓ History  [${item.type.padEnd(20)}] "${item.title.slice(0, 47)}…" → ${decisionValue}`
+          `  ✓ History  [${item.type.padEnd(20)}] "${item.title.slice(0, 47)}…" → ${decision}`
         );
       }
 

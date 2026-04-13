@@ -16,6 +16,10 @@
 
 import type { Provider, ProviderResult, IAgentRuntime, Memory, State } from "@elizaos/core";
 
+// Follow-up intent: questions that need weather context but contain no city
+const FOLLOW_UP_RE = /\b(golf|walk|run|jog|picnic|bike|hike|outdoor|outside|umbrella|jacket|coat|dress|which day|best day|good day|nice day|play outside|go out)\b/i;
+const WEATHER_FACT_TTL = 15 * 60 * 1000; // 15 minutes
+
 // ─── Intent detection ─────────────────────────────────────────────────────────
 
 const SEARCH_INTENT_RE = /weather|forecast|temperature|rain|sunny|snow|wind|humidity|search|find|look up|what is|who is|current|today|tomorrow|latest|news|price|check/i;
@@ -57,12 +61,12 @@ function timedFetch(url: string, init: RequestInit, ms = FETCH_TIMEOUT_MS): Prom
   return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(id));
 }
 
-function extractCity(query: string): string {
+function extractCity(query: string): string | null {
   // Stop at comma/punctuation so "in Prague, and tell me..." extracts just "Prague"
   const match = query.match(
     /(?:in|for|at)\s+([A-Za-z][a-zA-Z\s]{1,30}?)(?=[,!?]|\s+(?:tomorrow|today|this\s+week|next\s+week|on\s+\w|and\b)|$)/i
   );
-  return match?.[1]?.trim() || "London";
+  return match?.[1]?.trim() ?? null;
 }
 
 function extractMessageText(message: Memory): string {
@@ -203,8 +207,11 @@ async function fetchWeatherOpenMeteo(city: string): Promise<string | null> {
 
 // ─── Weather: try wttr.in, fall back to Open-Meteo ───────────────────────────
 
-async function fetchWeather(query: string): Promise<string> {
+async function fetchWeather(query: string): Promise<string | null> {
   const city = extractCity(query);
+  // No city found — return null so the provider stays silent and lets the LLM
+  // reason from prior conversation context instead of fetching wrong-location data.
+  if (!city) return null;
 
   const wttr = await fetchWeatherWttr(city);
   if (wttr) return wttr;
@@ -254,11 +261,36 @@ export const webSearchProvider: Provider = {
     "Weather: tries wttr.in first, falls back to Open-Meteo. Failure is explicit — never silent.",
 
   get: async (
-    _runtime: IAgentRuntime,
+    runtime: IAgentRuntime,
     message: Memory,
     _state: State
   ): Promise<ProviderResult> => {
     const text = extractMessageText(message);
+
+    // Follow-up question: no city, but weather context needed (e.g. "which day for golf?")
+    // Read the fact memory stored by WeatherContextEvaluator instead of re-fetching.
+    if (!SEARCH_INTENT_RE.test(text) && FOLLOW_UP_RE.test(text)) {
+      try {
+        const facts = await runtime.getMemories({
+          roomId:    message.roomId,
+          tableName: "facts",
+          count:     5,
+        });
+        const weatherFact = facts
+          .filter(f => f.content?.source === "weather-context-evaluator")
+          .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0];
+
+        const fetchedAt = (weatherFact?.metadata as Record<string, unknown> | undefined)?.fetchedAt as number | undefined;
+        if (weatherFact && fetchedAt && Date.now() - fetchedAt < WEATHER_FACT_TTL) {
+          return {
+            text: `[WEATHER CONTEXT from earlier in this conversation — use this to answer]\n${weatherFact.content.text}`,
+          };
+        }
+      } catch {
+        // Memory read failed — fall through silently
+      }
+      return { text: "" };
+    }
 
     if (!SEARCH_INTENT_RE.test(text)) {
       return { text: "" };
@@ -273,6 +305,9 @@ export const webSearchProvider: Provider = {
     const result = WEATHER_RE.test(text)
       ? await fetchWeather(text)
       : await fetchDdgInstant(text);
+
+    // null means no city was found — stay silent, let LLM use conversation context.
+    if (result === null) return { text: "" };
 
     // Only cache successful results — don't poison the cache with transient failures.
     if (result !== SEARCH_UNAVAILABLE) setCached(cacheKey, result);

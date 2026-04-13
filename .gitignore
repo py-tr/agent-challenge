@@ -92,9 +92,12 @@ pnpm-lock.yaml
 bun.lockb
 /.eliza/.elizadb
 /dist
+/dist-frontend
 
 
 CONTEXT.md
+test.md
+feature-technical.md
 .claude/
 CLAUDE.md
 scripts/seed-gmail.ts

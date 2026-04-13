@@ -18,6 +18,8 @@
 
 const _startTime = Date.now();
 let _llmCallCount = 0;
+let _totalDurationMs = 0;
+let _totalResponseChars = 0;
 
 /**
  * Exponential moving average of inference latency.
@@ -31,15 +33,20 @@ let _avgLatencyMs: number | null = null;
 
 /**
  * Record a completed inference.
- * @param durationMs Wall-clock time from request start to first token (ms).
+ * @param durationMs      Wall-clock time from request start to response (ms).
+ * @param responseChars   Character count of the generated response (optional).
  */
-export function recordLlmCall(durationMs?: number): void {
+export function recordLlmCall(durationMs?: number, responseChars?: number): void {
   _llmCallCount++;
   if (durationMs != null && durationMs > 0) {
+    _totalDurationMs += durationMs;
     _avgLatencyMs =
       _avgLatencyMs === null
         ? durationMs
         : EMA_ALPHA * durationMs + (1 - EMA_ALPHA) * _avgLatencyMs;
+  }
+  if (responseChars != null && responseChars > 0) {
+    _totalResponseChars += responseChars;
   }
 }
 
@@ -54,6 +61,12 @@ export interface NosanaMetrics {
   llmCallCount: number;
   /** Exponential moving average of inference latency in milliseconds, or null if no calls yet. */
   avgLatencyMs: number | null;
+  /** Estimated tokens generated per second across all inferences. Null until 2+ calls. */
+  tokensPerSec: number | null;
+  /** Rough total tokens generated (responseChars / 4). */
+  totalTokensEstimated: number;
+  /** Rough cost estimate in USD based on ~$0.0003 per 1k tokens on Nosana. */
+  estimatedCostUsd: number;
   /** Agent process uptime in milliseconds. */
   uptimeMs: number;
   /** Value of PULSE_JOB_TYPE env var (morning | evening | scheduled). */
@@ -84,15 +97,28 @@ export function getMetrics(): NosanaMetrics {
     process.env.SMALL_MODEL ??
     null;
 
+  // tokens/sec: estimate tokens from response chars (÷4), divide by total inference time
+  const totalTokens = Math.round(_totalResponseChars / 4);
+  const tokensPerSec =
+    _llmCallCount >= 2 && _totalDurationMs > 0
+      ? Math.round(totalTokens / (_totalDurationMs / 1_000))
+      : null;
+
+  // Cost: Nosana pricing is ~$0.0003 per 1k tokens (rough estimate for display only)
+  const estimatedCostUsd = parseFloat(((totalTokens / 1_000) * 0.0003).toFixed(4));
+
   return {
     nodeId,
     isNosanaNode,
-    llmCallCount:  _llmCallCount,
-    avgLatencyMs:  _avgLatencyMs !== null ? Math.round(_avgLatencyMs) : null,
-    uptimeMs:      Date.now() - _startTime,
-    jobType:       process.env.PULSE_JOB_TYPE ?? "scheduled",
-    startedAt:     new Date(_startTime).toISOString(),
-    modelName:     rawModelName,
+    llmCallCount:         _llmCallCount,
+    avgLatencyMs:         _avgLatencyMs !== null ? Math.round(_avgLatencyMs) : null,
+    tokensPerSec,
+    totalTokensEstimated: totalTokens,
+    estimatedCostUsd,
+    uptimeMs:             Date.now() - _startTime,
+    jobType:              process.env.PULSE_JOB_TYPE ?? "scheduled",
+    startedAt:            new Date(_startTime).toISOString(),
+    modelName:            rawModelName,
   };
 }
 

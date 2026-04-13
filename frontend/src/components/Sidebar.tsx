@@ -1,7 +1,7 @@
-import { Inbox, Clock, Shield } from "lucide-react";
+import { Inbox, Clock, Shield, BarChart2 } from "lucide-react";
 import type { StatusResponse } from "../api/pulseApi";
 
-export type SidebarView = "queue" | "history" | "commitments";
+export type SidebarView = "queue" | "history" | "commitments" | "analytics";
 
 interface Props {
   activeView: SidebarView;
@@ -98,6 +98,11 @@ export function Sidebar({ activeView, onNavigate, pendingCount, committedCount, 
       label: "Commitments",
       icon: <Shield size={16} />,
       count: committedCount > 0 ? committedCount : undefined,
+    },
+    {
+      id: "analytics",
+      label: "Analytics",
+      icon: <BarChart2 size={16} />,
     },
   ];
 
@@ -215,6 +220,24 @@ export function Sidebar({ activeView, onNavigate, pendingCount, committedCount, 
                     {nosana.avgLatencyMs < 1000
                       ? `${nosana.avgLatencyMs}ms`
                       : `${(nosana.avgLatencyMs / 1000).toFixed(1)}s`}
+                  </span>
+                </>
+              )}
+
+              {nosana.tokensPerSec != null && (
+                <>
+                  <span className="text-[10px]" style={{ color: "#64748b" }}>Tokens/s</span>
+                  <span className="font-mono text-[10px] text-right" style={{ color: "#34d399" }}>
+                    {nosana.tokensPerSec}
+                  </span>
+                </>
+              )}
+
+              {nosana.estimatedCostUsd != null && nosana.estimatedCostUsd > 0 && (
+                <>
+                  <span className="text-[10px]" style={{ color: "#64748b" }}>Est. cost</span>
+                  <span className="font-mono text-[10px] text-right" style={{ color: "#94a3b8" }}>
+                    ${nosana.estimatedCostUsd.toFixed(4)}
                   </span>
                 </>
               )}

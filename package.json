@@ -21,11 +21,13 @@
     "@elizaos/plugin-anthropic": "^1.5.12",
     "@elizaos/plugin-bootstrap": "^1.0.0",
     "@elizaos/plugin-openai": "^1.0.0",
-    "drizzle-orm": "0.45.2"
+    "drizzle-orm": "0.45.2",
+    "pdf-parse": "^2.4.5"
   },
   "devDependencies": {
     "@elizaos/cli": "^1.0.0",
     "@types/node": "^22.0.0",
+    "@types/pdf-parse": "^1.1.5",
     "concurrently": "^9.2.1",
     "typescript": "^5.0.0",
     "vitest": "^2.1.8"
