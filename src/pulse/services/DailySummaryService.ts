@@ -17,6 +17,7 @@ import type { IAgentRuntime } from "@elizaos/core";
 import { countAllStatuses } from "../db/queries.js";
 import type { Db } from "../db/schema.js";
 import { GmailMcpService } from "./GmailMcpService.js";
+import { localYMD, localHour } from "../lib/userTimezone.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -71,9 +72,9 @@ export class DailySummaryService extends Service {
 
   private async checkAndSend(): Promise<void> {
     const now = new Date();
-    if (now.getHours() !== SEND_HOUR) return;
+    if (localHour(now) !== SEND_HOUR) return;
 
-    const todayStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
+    const todayStr = localYMD(now); // user's local YYYY-MM-DD
 
     const lastSent = await this.runtime.getCache<string>(CACHE_KEY);
     if (lastSent === todayStr) return; // already sent today

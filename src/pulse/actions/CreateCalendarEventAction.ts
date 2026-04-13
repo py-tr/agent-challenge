@@ -59,7 +59,8 @@ interface ExtractedEvent {
  */
 function buildDateTimeContext(now: Date): string {
   const pad  = (n: number) => String(n).padStart(2, "0");
-  const ymd  = (d: Date)   => d.toISOString().slice(0, 10);
+  // Use LOCAL date components — toISOString() returns UTC which is wrong in non-UTC timezones.
+  const ymd  = (d: Date)   => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   const hm   = (d: Date)   => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
   const DAY_NAMES = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];

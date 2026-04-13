@@ -92,7 +92,9 @@ export function getMetrics(): NosanaMetrics {
     apiUrl.includes(".nos.ci") || apiUrl.includes("nosana");
 
   // Model name only — never the API key or full URL.
+  // Prefer OLLAMA_MODEL when Ollama is the primary (SKIP_OLLAMA !== "true").
   const rawModelName =
+    (process.env.SKIP_OLLAMA !== "true" ? process.env.OLLAMA_MODEL : null) ??
     process.env.OPENAI_SMALL_MODEL ??
     process.env.SMALL_MODEL ??
     null;

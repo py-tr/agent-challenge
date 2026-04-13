@@ -28,6 +28,7 @@ import { actionItems, commitments } from "../db/schema.js";
 import type { Db } from "../db/schema.js";
 import { CalendarMcpService } from "./CalendarMcpService.js";
 import type { CalendarEvent } from "../lib/calendarClient.js";
+import { localYMD } from "../lib/userTimezone.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -158,7 +159,7 @@ export class MorningBriefingService extends Service {
 
       // getEvents returns the next N days; filter down to today only.
       const allEvents = await calSvc.getEvents(1);
-      const todayStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      const todayStr = localYMD(); // user's local YYYY-MM-DD
 
       return allEvents
         .filter((e) => e.start.startsWith(todayStr))

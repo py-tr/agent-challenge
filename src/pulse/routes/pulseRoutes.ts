@@ -63,6 +63,24 @@ import {
   recordSentDraft as _recordSentDraft,
   type SentDraftEntry,
 } from "../lib/routeHelpers.js";
+import {
+  setUserTimezone,
+  getUserTimezone,
+  localYMD,
+  localDayOfWeek,
+} from "../lib/userTimezone.js";
+
+// ─── Timezone detection ───────────────────────────────────────────────────────
+
+/**
+ * Extract X-Timezone header from an incoming request and update the stored
+ * user timezone so LLM date context and background services use the correct tz.
+ */
+function applyTimezoneHeader(req: RouteRequest): void {
+  const raw = req.headers?.["x-timezone"] ?? req.headers?.["X-Timezone"];
+  const tz = Array.isArray(raw) ? raw[0] : raw;
+  if (tz) setUserTimezone(tz);
+}
 
 // ─── Shared calendar helpers ──────────────────────────────────────────────────
 
@@ -83,31 +101,34 @@ function eventsOverlap(startA: string, endA: string, startB: string, endB: strin
  * Pre-built date/time context string for LLM prompts.
  * Provides today's date, weekday lookup, and common relative-time values so
  * small models never have to do calendar arithmetic themselves.
+ * Uses the user's detected timezone (from X-Timezone header) so dates are
+ * correct when the server runs in a different timezone than the user.
  */
 function buildLlmDateContext(now: Date = new Date()): string {
-  const pad  = (n: number) => String(n).padStart(2, "0");
-  const ymd  = (d: Date)   => d.toISOString().slice(0, 10);
-  const hm   = (d: Date)   => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  const DAY  = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
-  const todayIdx = now.getDay();
+  const DAY      = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+  const todayIdx = localDayOfWeek(now);
 
-  const nextDay = (target: number): Date => {
-    const d = new Date(now);
+  // Build next-occurrence dates in user's timezone using UTC-safe arithmetic.
+  // We use the user's local YMD to construct a noon-UTC anchor for each target day.
+  const tz = getUserTimezone();
+  const todayYmd = localYMD(now, tz);
+  const [ty, tm, td] = todayYmd.split("-").map(Number);
+
+  const nextDay = (target: number): string => {
     let delta = target - todayIdx;
     if (delta <= 0) delta += 7;
-    d.setDate(d.getDate() + delta);
-    return d;
+    const d = new Date(Date.UTC(ty, tm - 1, td + delta, 12));
+    return localYMD(d, tz);
   };
 
-  const tomorrow = new Date(now);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowYmd = localYMD(new Date(Date.UTC(ty, tm - 1, td + 1, 12)), tz);
 
   return [
     `=== DATE/TIME REFERENCE (use these exact values — do NOT compute yourself) ===`,
-    `today    = ${ymd(now)}  (${DAY[todayIdx]})`,
-    `tomorrow = ${ymd(tomorrow)}`,
+    `today    = ${todayYmd}  (${DAY[todayIdx]})`,
+    `tomorrow = ${tomorrowYmd}`,
     `--- Next occurrence of each weekday ---`,
-    ...DAY.map((name, i) => `${name.padEnd(12)} = ${ymd(nextDay(i))}`),
+    ...DAY.map((name, i) => `${name.padEnd(12)} = ${nextDay(i)}`),
     `--- Time-of-day defaults ---`,
     `morning = 09:00  noon/lunch = 12:00  afternoon = 14:00  evening = 18:00`,
     `=== END REFERENCE ===`,
@@ -1354,6 +1375,7 @@ export const pulseRoutes: Route[] = [
     type: "POST" as const,
     path: "/create-calendar-event",
     handler: async (req: RouteRequest, res: RouteResponse, runtime: IAgentRuntime) => {
+      applyTimezoneHeader(req);
       try {
         const { message } = (req.body as { message?: string }) ?? {};
         if (!message?.trim()) { err(res, "message is required", 400); return; }
@@ -1660,6 +1682,7 @@ export const pulseRoutes: Route[] = [
     type: "POST" as const,
     path: "/resolve-conflict",
     handler: async (req: RouteRequest, res: RouteResponse, runtime: IAgentRuntime) => {
+      applyTimezoneHeader(req);
       try {
         const {
           message,
@@ -1694,7 +1717,7 @@ export const pulseRoutes: Route[] = [
           `Reply with ONLY valid JSON, no markdown:\n` +
           `{"targetEvent":"A"|"B"|"unknown","targetTime":"HH:MM"|null,"targetDate":"YYYY-MM-DD"|null,"reasoning":"..."}\n` +
           `Rules:\n` +
-          `- targetTime: 24h format (e.g. "16:00") or null if not mentioned.\n` +
+          `- targetTime: 24h format. Convert "3pm"→"15:00", "2pm"→"14:00", "11am"→"11:00". null if not mentioned.\n` +
           `- targetDate: use the reference table above to resolve day names. null if same day as conflict.\n` +
           `- If user says "reschedule to Thursday", use the thursday date from the table.\n` +
           `- Return ONLY raw JSON, no markdown.`;
@@ -1741,7 +1764,7 @@ export const pulseRoutes: Route[] = [
           const targetDate = extracted.targetDate
             ?? date
             ?? eventAStart?.slice(0, 10)
-            ?? new Date().toISOString().slice(0, 10);
+            ?? localYMD();
           const newStart = `${targetDate}T${extracted.targetTime}:00`;
 
           // Build end time with pure arithmetic — never use toISOString() which converts to UTC.
@@ -1807,7 +1830,7 @@ export const pulseRoutes: Route[] = [
         }
 
         // If we know which event but no time, suggest free slots.
-        const slotsDate = date ?? (eventAStart?.slice(0, 10) ?? new Date().toISOString().slice(0, 10));
+        const slotsDate = date ?? (eventAStart?.slice(0, 10) ?? localYMD());
         const slotsResult = await listEvents(3);
         const dayEvents = slotsResult.events.filter((e) => {
           if (e.allDay) return false;
@@ -1867,6 +1890,7 @@ export const pulseRoutes: Route[] = [
     type: "POST" as const,
     path: "/reschedule-by-title",
     handler: async (req: RouteRequest, res: RouteResponse, runtime: IAgentRuntime) => {
+      applyTimezoneHeader(req);
       try {
         const { message } = (req.body as { message?: string }) ?? {};
         if (!message) { err(res, "message required", 400); return; }

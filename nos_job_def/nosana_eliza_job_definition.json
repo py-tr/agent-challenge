@@ -11,6 +11,7 @@
         "env": {
           "SERVER_PORT": "3000",
           "NODE_ENV": "production",
+          "TZ": "Europe/Prague",
           "PULSE_SEED_ON_START": "true",
           "EMBEDDING_PROVIDER": "none",
           "OLLAMA_MODEL": "qwen2.5:14b",

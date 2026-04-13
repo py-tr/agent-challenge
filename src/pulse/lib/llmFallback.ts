@@ -14,6 +14,7 @@
  */
 
 import { ModelType, type IAgentRuntime } from "@elizaos/core";
+import { recordLlmCall } from "./nosanaMetrics.js";
 
 const OLLAMA_BASE = (process.env.OLLAMA_BASE_URL ?? "http://localhost:11434/v1").replace(/\/$/, "");
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "qwen2.5:14b";
@@ -67,7 +68,9 @@ export async function useModelWithFallback(
   // ── Attempt 1: local Ollama (skipped if SKIP_OLLAMA=true) ──
   if (!SKIP_OLLAMA) {
     try {
+      const t0 = Date.now();
       const result = await ollamaCompletion(params);
+      recordLlmCall(Date.now() - t0, result.length);
       return result;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

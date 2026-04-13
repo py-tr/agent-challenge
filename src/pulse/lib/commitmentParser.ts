@@ -38,7 +38,10 @@ export function hasCommitmentPattern(text: string): boolean {
 
 // ─── Full Extraction ──────────────────────────────────────────────────────────
 
-const TODAY_LABEL = (): string => new Date().toISOString().slice(0, 10);
+const TODAY_LABEL = (): string => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 
 /**
  * Extract all commitments from `text`.

@@ -130,8 +130,9 @@ export interface EmailDraftContext {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Timezone": tz },
     ...init,
   });
   if (!res.ok) {
