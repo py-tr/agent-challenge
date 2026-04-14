@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 
-FROM node:23-slim AS base
+# Use CUDA runtime base so Ollama can see the GPU via NVIDIA Container Toolkit
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS base
 
 # ── System dependencies ────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y \
@@ -13,13 +14,18 @@ RUN apt-get update && apt-get install -y \
   ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-# Install Ollama binary from official image (cleaner than install.sh — no systemd)
+# Install Node.js 23
+RUN curl -fsSL https://deb.nodesource.com/setup_23.x | bash - \
+  && apt-get install -y nodejs \
+  && rm -rf /var/lib/apt/lists/*
+
+# Install Ollama binary + CUDA runner libraries from official image
+# Copying /usr/lib/ollama/ is required — it contains the CUDA backend (.so files)
+# that the binary dynamically loads. Without it Ollama falls back to CPU.
 COPY --from=ollama/ollama:latest /usr/bin/ollama /usr/local/bin/ollama
+COPY --from=ollama/ollama:latest /usr/lib/ollama/ /usr/lib/ollama/
 
 # Install bun (required by elizaos CLI).
-# Copy the binary to /usr/local/bin with world-executable permissions so it
-# is accessible to any user — Nosana may run the container as a non-root user
-# and /root/.bun/bin is not accessible outside of root's PATH.
 RUN curl -fsSL https://bun.sh/install | bash && \
     cp /root/.bun/bin/bun /usr/local/bin/bun && \
     chmod 755 /usr/local/bin/bun
@@ -33,9 +39,6 @@ ENV ELIZAOS_TELEMETRY_DISABLED=true
 ENV DO_NOT_TRACK=1
 
 # PULSE_DOCKER_BUILD=1 tells vite.config.ts to output to /srv/pulse-frontend
-# (outside /app so the Nosana volume mount cannot wipe the built assets).
-# We cannot use NODE_ENV for this because Vite always forces it to "production"
-# during builds, making it useless as a Docker/local discriminator.
 ENV PULSE_DOCKER_BUILD=1
 ENV NODE_ENV=production
 ENV SERVER_PORT=3000
@@ -56,9 +59,8 @@ COPY . .
 # 1. Compile TypeScript → /app/dist/
 RUN pnpm compile
 
-# 2. Build React frontend to /srv/pulse-frontend/ — completely outside /app so
-#    the Nosana volume mount (which covers all of /app) cannot wipe it at runtime.
-#    NODE_ENV=production is already set above; vite.config.ts routes output there.
+# 2. Build React frontend to /srv/pulse-frontend/ — outside /app so
+#    the Nosana volume mount cannot wipe it at runtime.
 RUN mkdir -p /srv/pulse-frontend
 RUN cd frontend && pnpm run build
 
@@ -69,7 +71,6 @@ RUN ls -la /srv/pulse-frontend/
 RUN mkdir -p /app/data
 
 EXPOSE 3000
-# Ollama API port (internal — not exposed to outside)
 EXPOSE 11434
 
 # Copy entrypoint script
@@ -79,8 +80,7 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # Store Ollama models outside /app to avoid Nosana volume mount conflicts
 ENV OLLAMA_MODELS=/var/ollama/models
 
-# Health check — /pulse/status is lightweight and always responds.
-# Start period is longer to account for Ollama startup + model pull on first boot.
+# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=300s --retries=5 \
   CMD curl -f http://localhost:3000/pulse/status || exit 1
 
