@@ -46,19 +46,19 @@ Pulse runs autonomously on a Nosana GPU node and makes those decisions for you �
 | **Email Triage** | Fetches Gmail, classifies each message (action-required / commitment / noise), and drafts a reply scaffold. Only actionable emails enter the queue. |
 | **Slib Guard** | Scans every *outgoing* email for commitment language — *"I'll send this by Friday"*, *"Let's sync next week"*. Logs a reminder 24h before the deadline. You promised it; Pulse remembers it. |
 | **Calendar Conflict Detection** | Finds overlapping events in the next 14 days. Proposes which one to reschedule and suggests free slots. |
-| **Approval Queue** | Every proposed action — email reply, calendar reschedule, follow-up nudge — sits in queue until you explicitly approve it. Nothing auto-executes. |
+| **Approval Queue** | Every proposed action — email reply, calendar reschedule, follow-up nudge — sits in queue until you explicitly approved. Nothing auto-executes. |
 | **Decision Memory** | Every approve/reject is stored. After 10+ decisions, Pulse surfaces patterns: *"You approve 87% of email drafts, reject 60% of reschedule requests."* |
 | **Follow-Up Detection** | Scans your SENT folder for emails with no reply. Creates follow-up queue items so nothing falls through the cracks. |
-| **Morning Briefing** | On startup, posts a prioritized summary of pending items, today's calendar, and due commitments. Hit "Listen" to hear it read aloud. |
+| **Morning Briefing** | On startup, posts a prioritized summary of pending items, today's calendar, and due commitments. |
 | **Meeting Prep** | *"Prepare me for the Q2 review"* — Pulse finds the event, pulls recent email threads with attendees, and generates a bullet-point prep brief from real data. |
 | **Calendar Q&A** | *"What's on my calendar this week?"* — fetches real events and injects them into the LLM prompt. No hallucinated schedules. |
 | **Weather** | *"Which day has the best weather for golf this week?"* — routes to wttr.in, no API key required. |
 | **PDF Analysis** | Upload any PDF in chat. Pulse extracts text, runs structured LLM analysis (summary, action items, risks), and injects doc context into follow-up questions. |
-| **Draft Style Memory** | The last 10 emails you actually sent are stored. `/draft-assist` injects them as style examples — Pulse learns to write like you over time. |
+| **Draft Style Memory** | The last 10 emails you actually sent are stored and injected as style examples — Pulse learns to write like you over time. |
 | **Inbox Health Score** | 0–100 score (SVG ring in sidebar) based on decisiveness, queue depth, and commitment reliability. Green / amber / red. |
 | **Analytics** | 7-day bar chart (approved vs rejected), per-type approval rates, and pattern summary after 10+ decisions. |
-| **Focus Mode** | One item at a time, full-screen. Keyboard shortcuts: A approve · R reject · J/K navigate. |
-| **Google OAuth Relay** | Static relay on GitHub Pages handles the OAuth redirect so any Pulse deployment (local or Nosana) uses a single registered URI. |
+| **Focus Mode** | One item at a time, full-screen. Keyboard shortcuts: `A` approve · `R` reject · `J`/`K` navigate. |
+| **Google OAuth Relay** | Static relay on GitHub Pages handles the OAuth redirect so any Pulse deployment (local or Nosana dynamic URL) works with a single pre-registered URI. |
 
 ---
 
@@ -82,7 +82,102 @@ Google Calendar ──► CalendarMcpService ──► conflictDetector ──�
 - Fire Slib Guard reminders for due commitments
 - Update inbox health score
 
-**Manual triggers available:** "Check my emails", "Scan for conflicts", Sync Now button.
+**Manual triggers available:** *"Check my emails"*, *"Scan for conflicts"*, Sync Now button.
+
+---
+
+## Quick Start
+
+### Option 1 — Demo mode (no credentials required)
+
+```bash
+git clone https://github.com/py-tr/agent-challenge
+cd agent-challenge && git checkout elizaos-challenge
+cp .env.example .env
+pnpm install && pnpm dev
+```
+
+Open `http://localhost:5173`. Pulse auto-seeds a full demo dataset — inbox queue, calendar conflicts, Slib Guard reminders, 7 days of analytics. Everything is fully interactive without any Google account.
+
+### Option 2 — With your own Gmail + Google Calendar
+
+#### Step 1 · Create Google OAuth credentials
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) → **APIs & Services → Credentials**
+2. Click **Create Credentials → OAuth 2.0 Client ID** → Application type: **Web application**
+3. Under **Authorized redirect URIs**, add:
+   ```
+   https://py-tr.github.io/agent-challenge/oauth-relay.html
+   ```
+4. Enable the following APIs (**APIs & Services → Library**):
+   - Gmail API
+   - Google Calendar API
+5. Download the credentials JSON — you need `client_id` and `client_secret`
+
+#### Step 2 · Configure and run
+
+Add to your `.env`:
+```env
+GOOGLE_CLIENT_ID=your_client_id
+GOOGLE_CLIENT_SECRET=your_client_secret
+```
+
+Start the agent:
+```bash
+pnpm dev
+```
+
+Open `http://localhost:3000/pulse/dashboard` → click **Sign in with Google** → authorize the requested scopes → you're connected.
+
+> **Note:** `GOOGLE_REFRESH_TOKEN` is obtained automatically via the OAuth flow in the dashboard. You do not need to set it manually.
+
+| Scenario | Behaviour |
+|----------|-----------|
+| No `GOOGLE_REFRESH_TOKEN` in env | Demo data auto-seeded on first boot |
+| `PULSE_SEED_ON_START=true` | Force seed even with credentials |
+| `PULSE_SEED_ON_START=false` | Never seed — real data only |
+| `GOOGLE_REFRESH_TOKEN` set | Real Gmail + Calendar, no seed |
+
+---
+
+## Deploy on Nosana
+
+### Using the Nosana dashboard (recommended)
+
+1. Go to [app.nosana.com](https://app.nosana.com) → **Jobs → Post Job**
+2. Copy the contents of `nos_job_def/nosana_eliza_job_definition.json`
+3. Paste it into the job definition editor (replacing the template)
+4. Fill in your credentials in the JSON:
+   ```json
+   "GOOGLE_CLIENT_ID": "your_client_id",
+   "GOOGLE_CLIENT_SECRET": "your_client_secret",
+   "USER_NAME": "Your Name"
+   ```
+5. Select **GPU market** — recommended: RTX 3090 (24 GB VRAM, sufficient for qwen2.5:14b)
+6. Click **Deploy**
+7. Once the job starts, open the node URL → `/pulse/dashboard`
+8. Click **Sign in with Google** to connect your Gmail
+
+> **OAuth relay:** The dashboard login uses a static GitHub Pages relay (`py-tr.github.io/agent-challenge/oauth-relay.html`) so the Nosana node's dynamic URL works with Google's pre-registered redirect URI. Add this URL to your OAuth client's authorized redirect URIs (see Step 1 above).
+
+### Using nosana-cli
+
+```bash
+nosana job post \
+  --file ./nos_job_def/nosana_eliza_job_definition.json \
+  --market nvidia-3090 \
+  --timeout 3600
+```
+
+### Job definition fields
+
+| Field | Value | Notes |
+|-------|-------|-------|
+| `OLLAMA_MODEL` | `qwen2.5:14b` | Pulled on first boot, cached in `/var/ollama/models` |
+| `SKIP_OLLAMA` | `false` | `true` routes all inference to `OPENAI_API_URL` directly |
+| `OPENAI_API_URL` | Nosana endpoint | Optional fallback if Ollama is unavailable |
+| `PULSE_SEED_ON_START` | `true` | Set `false` when using real Gmail credentials |
+| `USER_NAME` | Your name | Personalises the morning briefing |
 
 ---
 
@@ -143,14 +238,7 @@ Nosana GPU Node
     └── llmFallback.ts: Ollama → Nosana endpoint fallback
 ```
 
-All LLM inference (email classification, draft generation, chat, meeting prep) runs on the Nosana GPU. Two job definitions in `nos_job_def/` — morning and evening processing runs.
-
-```bash
-nosana job post \
-  --file ./nos_job_def/nosana_eliza_job_definition.json \
-  --market nvidia-4070 \
-  --timeout 60
-```
+All LLM inference (email classification, draft generation, chat, meeting prep) runs on the Nosana GPU. The Docker image is based on `ollama/ollama:latest` with Node.js installed on top — Ollama has full CUDA support out of the box.
 
 ### Custom Chat Completions Handler
 
@@ -167,15 +255,14 @@ This makes Pulse work on **any Nosana node** without modification.
 
 ### `SKIP_OLLAMA=true` Mode
 
-Set this to skip the local Ollama instance and route all inference directly to `OPENAI_API_URL`. Useful when deploying to a market where the model is already a required resource — gives instant availability without a model pull.
+Routes all inference directly to `OPENAI_API_URL` — useful when deploying to a market where a hosted model is already available, avoiding the model pull overhead.
 
 ### GPU Metrics
 
-Every inference call is tracked. The sidebar panel shows:
+Every inference call is tracked. The sidebar panel shows live stats:
 
 ```json
 {
-  "nodeId": "3gsrmj...",
   "isNosanaNode": true,
   "llmCallCount": 47,
   "avgLatencyMs": 812,
@@ -186,36 +273,6 @@ Every inference call is tracked. The sidebar panel shows:
 ```
 
 `avgLatencyMs` is an exponential moving average (α = 0.2) computed from wall-clock inference durations.
-
----
-
-## Quick Start
-
-### Without Google credentials (demo mode)
-
-```bash
-git clone https://github.com/py-tr/agent-challenge
-cd agent-challenge && git checkout elizaos-challenge
-cp .env.example .env
-pnpm install && pnpm dev
-```
-
-Open `http://localhost:5173`. Pulse auto-seeds a full demo dataset — inbox queue, calendar conflicts, Slib Guard reminders, 7 days of analytics. Everything is fully interactive without connecting any Google account.
-
-### With real Gmail + Google Calendar
-
-1. Create OAuth 2.0 credentials at [console.cloud.google.com](https://console.cloud.google.com)
-2. Add redirect URI: `https://py-tr.github.io/agent-challenge/oauth-relay.html`
-3. Enable Gmail API + Google Calendar API
-4. Add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to `.env`
-5. Open the dashboard → click **Sign in with Google**
-
-| Scenario | Behaviour |
-|----------|-----------|
-| No `GOOGLE_REFRESH_TOKEN` | Demo data auto-seeded on first boot |
-| `PULSE_SEED_ON_START=true` | Force seed even with credentials |
-| `PULSE_SEED_ON_START=false` | Never seed |
-| `GOOGLE_REFRESH_TOKEN` set | Real Gmail + Calendar only |
 
 ---
 
@@ -239,14 +296,15 @@ Open `http://localhost:5173`. Pulse auto-seeds a full demo dataset — inbox que
 |----------|-------------|
 | `GOOGLE_CLIENT_ID` | OAuth client ID — enables Sign in with Google |
 | `GOOGLE_CLIENT_SECRET` | OAuth client secret |
-| `GOOGLE_REFRESH_TOKEN` | Long-lived refresh token — skips OAuth flow |
-| `PULSE_PUBLIC_URL` | Public base URL for OAuth redirect |
+| `GOOGLE_REFRESH_TOKEN` | Long-lived refresh token — skips OAuth flow on boot |
+| `PULSE_PUBLIC_URL` | Public base URL override for OAuth redirect (auto-detected from request headers if unset) |
 
 **General**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SERVER_PORT` | `3000` | Backend port |
+| `USER_NAME` | — | Displayed in briefings and personalisation |
 | `PULSE_JOB_TYPE` | — | `morning` or `evening` — logged in GPU metrics |
 | `PULSE_SEED_ON_START` | — | `true` / `false` / unset |
 | `EMBEDDING_PROVIDER` | — | Set to `none` — embeddings not used |
@@ -257,10 +315,10 @@ Open `http://localhost:5173`. Pulse auto-seeds a full demo dataset — inbox que
 
 ```bash
 docker build -t pytrdev/pulse-agent:latest .
-docker run -p 3000:3000 --env-file .env pytrdev/pulse-agent:latest
+docker run --gpus all -p 3000:3000 --env-file .env pytrdev/pulse-agent:latest
 ```
 
-Frontend is compiled into `/srv/pulse-frontend/` at build time and served by the ElizaOS HTTP server — no separate container needed. The Nosana `/app` volume mount doesn't interfere.
+The image is based on `ollama/ollama:latest` (full CUDA support) with Node.js 23 installed on top. Frontend is compiled into `/srv/pulse-frontend/` at build time — no separate container needed. The Nosana `/app` volume mount doesn't interfere with either the frontend or the Ollama model cache.
 
 ---
 
@@ -273,11 +331,6 @@ pnpm test
 **Integration test script** (requires agent running on `:3000`):
 
 ```bash
-# macOS / Linux
-bash test_pulse.sh
-
-# Windows — use Git Bash, not PowerShell
-# Open Git Bash from Start menu, or in VS Code terminal dropdown select "Git Bash"
 bash test_pulse.sh
 ```
 
@@ -347,6 +400,8 @@ nosanaMetrics.test.ts      21 tests  inference counter, EMA latency, formatUptim
 **MCP-first, REST fallback.** `gmailClient.ts` tries Gmail MCP first; falls back to direct REST calls. Callers see an identical interface regardless of which path succeeded.
 
 **Providers over action callbacks.** `WebSearchProvider` fetches live data and injects it into the LLM prompt *before* generation — the model has real data when it starts composing, not after.
+
+**`ollama/ollama` base image.** The Docker image is based on the official Ollama image rather than a generic Linux base, ensuring the full CUDA stack (runner libs, CUDA backends) is present and GPU inference works on Nosana nodes without manual library configuration.
 
 ---
 
