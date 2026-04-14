@@ -55,3 +55,13 @@ export async function resolveRefreshToken(): Promise<string | null> {
   // Use || not ?? so that an empty-string env var falls through to the stored file.
   return process.env.GOOGLE_REFRESH_TOKEN || (await getStoredRefreshToken());
 }
+
+/** Deletes the stored refresh token file and clears the in-memory cache. */
+export async function clearStoredRefreshToken(): Promise<void> {
+  _cached = null;
+  try {
+    await fs.unlink(AUTH_FILE);
+  } catch {
+    // File may not exist — that's fine.
+  }
+}

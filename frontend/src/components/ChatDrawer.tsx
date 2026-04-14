@@ -757,6 +757,8 @@ export function ChatDrawer({
   const currentSessionIdRef = useRef<string | null>(null);
   /** setInterval handle for the polling fallback. */
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Last calendar-create message that got a 409 conflict — replayed when user says "schedule anyway". */
+  const lastConflictedCalendarMsg = useRef<string | null>(null);
   /** Captures the sid + after values needed inside the interval callback. */
   const pollContextRef = useRef<{ sid: string; after: Date } | null>(null);
 
@@ -1133,6 +1135,7 @@ export function ChatDrawer({
           const message = e instanceof Error ? e.message : "Unknown error";
           // 409 conflict messages are already user-friendly — show as-is.
           const isConflict = message.includes("You already have") || message.includes("at that time");
+          if (isConflict) lastConflictedCalendarMsg.current = trimmed;
           setMessages((prev) => [
             ...prev,
             {
@@ -1140,6 +1143,29 @@ export function ChatDrawer({
               text: isConflict ? `⚠ ${message}` : `Couldn't create the event: ${message}`,
               ts: new Date(),
             },
+          ]);
+        } finally {
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      // ── "Schedule anyway" override — replay last conflicted message with force flag ─
+      const FORCE_SCHEDULE_RE = /^\s*(schedule|book|create|add|yes|do it|override|force|go ahead|anyway)\s*(anyway|regardless|it|please)?\s*$/i;
+      if (FORCE_SCHEDULE_RE.test(trimmed) && lastConflictedCalendarMsg.current) {
+        const forced = `schedule anyway — ${lastConflictedCalendarMsg.current}`;
+        try {
+          const result = await pulseApi.createCalendarEvent(forced);
+          lastConflictedCalendarMsg.current = null;
+          setMessages((prev) => [
+            ...prev,
+            { role: "agent", text: result.confirmText, ts: new Date(), positive: true },
+          ]);
+        } catch (e) {
+          const message = e instanceof Error ? e.message : "Unknown error";
+          setMessages((prev) => [
+            ...prev,
+            { role: "agent", text: `Couldn't create the event: ${message}`, ts: new Date() },
           ]);
         } finally {
           setIsLoading(false);
@@ -1219,9 +1245,16 @@ export function ChatDrawer({
       // would only say "noted" without actually persisting anything.
       const COMMITMENT_RE =
         /\b(i\s+will\b|i'll\b|i\s+promise\b|i\s+commit\b|i\s+need\s+to\b|i\s+must\b|i\s+have\s+to\b)\b/i;
-      if (!draft && !conflictContext && COMMITMENT_RE.test(trimmed)) {
+      if (!conflictContext && COMMITMENT_RE.test(trimmed)) {
         try {
           const result = await pulseApi.logCommitment(trimmed);
+          if (!result.saved) {
+            // LLM couldn't extract a commitment — fall through to agent for a natural response
+            setIsLoading(false);
+            // re-run as agent message
+            void sendToAgent(trimmed);
+            return;
+          }
           const confirmText = result.deadline
             ? `Commitment logged — deadline **${result.deadline}**. It's in your queue under Slib Guard.`
             : `Commitment logged. It's in your queue under Slib Guard.`;
@@ -1240,7 +1273,7 @@ export function ChatDrawer({
       // Fetch real forecast from wttr.in via the backend. Small models hallucinate
       // weather data badly. Store result for follow-up questions ("best day for golf?").
       const WEATHER_RE =
-        /\b(weather|forecast|rain|snow|sunny|cloudy|temperature|degrees?|celsius|fahrenheit)\b/i;
+        /\b(weather|forecast|rain|snow|sunny|cloudy|temperature|degrees?|celsius|fahrenheit)\b|\b(best|good|which).{0,30}\b(weather|day).{0,30}\b(golf|outdoor|outside|run|sport|hike|walk|picnic)\b/i;
       if (!draft && !conflictContext && WEATHER_RE.test(trimmed)) {
         try {
           const result = await pulseApi.getWeather(trimmed);
@@ -1253,6 +1286,56 @@ export function ChatDrawer({
         } catch (e) {
           const message = e instanceof Error ? e.message : "Couldn't fetch weather";
           setMessages((prev) => [...prev, { role: "agent", text: message, ts: new Date() }]);
+        } finally {
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      // ── "Draft an email" intercept ───────────────────────────────────────────
+      // Opens the inline compose window with an LLM-generated draft.
+      // Picks up any recent agent message as context (e.g. web search result).
+      const DRAFT_EMAIL_RE =
+        /\b(draft|write|compose|create|make)\b.{0,60}\b(email|mail|message)\b|\b(email|mail)\b.{0,40}\b(draft|about|regarding|summariz|summar)\b|\b(make|create|write)\b.{0,20}\ba\s+draft\b|\bdraft\s+(this|it|out|from|based|the\s+\w)/i;
+      if (!draft && !conflictContext && DRAFT_EMAIL_RE.test(trimmed)) {
+        try {
+          // Extract recipient if mentioned: "to Anna" / "to anna@example.com"
+          const toMatch = trimmed.match(/\bto\s+([A-Za-z0-9._%+\-]+(?:@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})?)\b/i);
+          const toAddr = toMatch ? toMatch[1] : "";
+
+          // Use last agent message as body context (e.g. web search summary)
+          const lastAgentMsg = [...messages].reverse().find((m) => m.role === "agent")?.text ?? "";
+          const contextSnippet = lastAgentMsg.slice(0, 1_500);
+
+          // Infer subject from user message
+          const subjectGuess = trimmed
+            .replace(/^(draft|write|compose|create|make)\s+(an?\s+)?email\s*(about|on|regarding|for|to\s+\S+\s*(about|on|regarding)?)?/i, "")
+            .replace(/\bto\s+\S+/i, "")
+            .trim()
+            .slice(0, 80) || "Draft";
+
+          const { reply } = await pulseApi.draftAssist({
+            subject: subjectGuess,
+            to: toAddr,
+            currentBody: contextSnippet,
+            instruction:
+              `Draft a concise professional email about: ${subjectGuess}. ` +
+              (contextSnippet ? `Use this as context:\n${contextSnippet}\n\n` : "") +
+              "Start with Hi [recipient or there], end with Best regards. Keep it under 200 words.",
+          });
+          const cleanBody = reply
+            .replace(/^```[\w]*\n?/im, "").replace(/\n?```$/m, "")
+            .replace(/^---\n?/m, "").replace(/\n?---$/m, "")
+            .replace(/\[CALENDAR_INTENT\]/g, "").trim();
+          setInlineEmailDraft({ to: toAddr, subject: subjectGuess, body: cleanBody });
+          setMessages((prev) => [...prev, {
+            role: "agent",
+            text: "Draft ready — review it below, edit as needed, then hit Send.",
+            ts: new Date(),
+          }]);
+        } catch (e) {
+          const message = e instanceof Error ? e.message : "Unknown error";
+          setMessages((prev) => [...prev, { role: "agent", text: `Couldn't draft the email: ${message}`, ts: new Date() }]);
         } finally {
           setIsLoading(false);
         }
@@ -1522,20 +1605,21 @@ export function ChatDrawer({
       // If a document is attached, prepend its extracted text as context so the
       // agent can answer questions about it. Keep the doc attached so the user
       // can use the Email chip later without losing context.
-      // Cap at 1500 chars so the full message stays well under ElizaOS's 4000-char limit.
+      // Use up to 6000 chars — enough for most PDFs without hitting ElizaOS limits.
       const docForChat = attachedDocRef.current;
       let agentText = trimmed;
       if (docForChat?.text) {
-        agentText = `[Document context — "${docForChat.filename}" — answer from this document only, do not search the web]\n${docForChat.text.slice(0, 1500)}\n\n---\n\n${trimmed}`;
+        agentText = `[Document: "${docForChat.filename}" — answer ONLY from this document, quote directly when asked about specific sections]\n${docForChat.text.slice(0, 6000)}\n\n---\n\n${trimmed}`;
       }
 
       // ── Weather context injection ──────────────────────────────────────────
-      // If the user asks a follow-up about outdoor plans and we already fetched
-      // a weather forecast this session, prepend it so the model can reason.
+      // If the user asks a follow-up about outdoor plans / clothing / weather
+      // and we already fetched a forecast this session, prepend it so the model
+      // can reason over the actual data instead of saying "I don't know".
       const WEATHER_FOLLOWUP_RE =
-        /\b(best|good|ideal|great)\b.{0,40}\b(day|time)\b.{0,60}\b(golf|run|jog|tennis|walk|hike|outdoor|outside|sport|picnic)\b/i;
+        /\b(best|good|ideal|great|worst|which|what).{0,60}\b(day|time|weather|forecast|temperature|rain|sunny|jacket|umbrella|coat|dress|wear|outside|outdoor|golf|run|jog|tennis|walk|hike|sport|picnic)\b|\b(jacket|umbrella|coat|dress)\b|\b(golf|outdoor|outside|sport).{0,60}\b(day|when|weather)\b/i;
       if (WEATHER_FOLLOWUP_RE.test(trimmed) && lastWeatherRef.current) {
-        agentText = `[Weather forecast]\n${lastWeatherRef.current}\n\n---\n\n${agentText}`;
+        agentText = `[Weather forecast for context — use this data to answer]\n${lastWeatherRef.current}\n\n---\n\n${agentText}`;
       }
 
       // ── Calendar context injection ─────────────────────────────────────────
@@ -1648,6 +1732,12 @@ export function ChatDrawer({
             draftSuggestion: suggestion ?? undefined,
           },
         ]);
+
+        // If the agent ran PROCESS_EMAILS or similar, refresh the queue.
+        const QUEUE_CHANGE_RE = /\b(email|inbox|queue|sync|scan|process|conflict|reminder|commitment)\b/i;
+        if (QUEUE_CHANGE_RE.test(trimmed) && onQueueRefresh) {
+          setTimeout(onQueueRefresh, 500);
+        }
       } catch (err) {
         if (err instanceof Error && err.name === "AbortError") return;
         const message = err instanceof Error ? err.message : "Unknown error";

@@ -25,6 +25,7 @@ import { CalendarMcpService } from "../services/CalendarMcpService.js";
 import { insertActionItem } from "../db/queries.js";
 import type { Db } from "../db/schema.js";
 import { useModelWithFallback } from "../lib/llmFallback.js";
+import { getUserTimezone } from "../lib/userTimezone.js";
 
 // ─── Intent detection ─────────────────────────────────────────────────────────
 
@@ -349,7 +350,7 @@ export const createCalendarEventAction: Action = {
 
     // Prefer LLM-detected timezone; fall back to the system's local timezone
     // (works correctly on the user's machine — avoids UTC shifting 1pm → 11am).
-    const timeZone = details.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const timeZone = details.timeZone ?? getUserTimezone();
 
     console.log("[Calendar] Creating event:", startIso, endIso, "tz:", timeZone);
 

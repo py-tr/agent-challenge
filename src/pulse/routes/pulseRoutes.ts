@@ -29,7 +29,7 @@ import { fileURLToPath } from "node:url";
 import { MemoryType, ModelType, type Route, type RouteRequest, type RouteResponse, type IAgentRuntime } from "@elizaos/core";
 import { PDFParse } from "pdf-parse";
 import { getMetrics } from "../lib/nosanaMetrics.js";
-import { saveRefreshToken, isGoogleAuthConfigured } from "../lib/authStore.js";
+import { saveRefreshToken, isGoogleAuthConfigured, clearStoredRefreshToken } from "../lib/authStore.js";
 import {
   getQueue,
   getActionItem,
@@ -201,6 +201,44 @@ function scanSentEmailForCommitments(
       }
     } catch (err) {
       console.warn("[Pulse:SlibGuard] Error scanning sent email for commitments:", err instanceof Error ? err.message : String(err));
+    }
+  })();
+}
+
+// ─── Meeting detection regex ──────────────────────────────────────────────────
+// Matches phrases like "let's meet", "schedule a call", "meet on Tuesday", etc.
+const MEETING_TRIGGER =
+  /\b(?:let(?:'?s| us)\s+(?:meet|schedule|connect|sync|talk|chat|catch\s+up)|schedule\s+(?:a\s+)?(?:call|meeting|sync|demo|chat)|(?:meet(?:ing)?|call|sync)\s+(?:on|at|this|next|tomorrow)|how\s+about\s+(?:a\s+)?(?:call|meeting|meeting|chat))\b/i;
+
+/**
+ * Scan a just-sent email body for meeting scheduling language.
+ * If found, queue a follow_up action item prompting the user to add it to their calendar.
+ * Fire-and-forget — never throws, never blocks the send response.
+ */
+function scanSentEmailForMeetings(
+  db: Db,
+  subject: string,
+  body: string,
+  recipient: string,
+): void {
+  if (!MEETING_TRIGGER.test(body) && !MEETING_TRIGGER.test(subject)) return;
+
+  void (async () => {
+    try {
+      await insertActionItem(db, {
+        type:     "follow_up",
+        title:    `📅 Schedule meeting discussed with ${recipient}`,
+        body:
+          `Your email **"${subject}"** mentioned scheduling a meeting with **${recipient}**.\n\n` +
+          `Want to add it to your calendar? Open the chat and say something like:\n\n` +
+          `> *"Schedule meeting with ${recipient} on [day] at [time]"*\n\n` +
+          `Approve to dismiss this reminder, or Reject to ignore.`,
+        metadata: { recipient, subject, source: "meeting_detection" },
+        priority: 3,
+      });
+      console.log(`[Pulse:MeetingDetect] Meeting language detected in sent email "${subject}" → queued follow_up`);
+    } catch (e) {
+      console.warn("[Pulse:MeetingDetect] Error:", e instanceof Error ? e.message : String(e));
     }
   })();
 }
@@ -811,8 +849,8 @@ export const pulseRoutes: Route[] = [
           return;
         }
 
-        console.log("[Pulse:Routes] POST /pulse/process — running full processing cycle…");
-        const result = await bgSvc.runProcessingCycle();
+        console.log("[Pulse:Routes] POST /pulse/process — running full processing cycle (forceFull)…");
+        const result = await bgSvc.runProcessingCycle(true);
 
         // Refresh briefing after cycle so BriefingPanel reflects the new queue state.
         void (runtime.getService(MorningBriefingService.serviceType) as MorningBriefingService | null)
@@ -833,6 +871,20 @@ export const pulseRoutes: Route[] = [
         console.error(`[Pulse:Routes] POST /pulse/process: ${msg}`);
         err(res, msg);
       }
+    },
+  },
+
+  // ── POST /pulse/reset-sync ───────────────────────────────────────────────
+  // Clears the Gmail historyId cursor so the next Sync Now does a full inbox
+  // fetch instead of an incremental one. Useful when emails are missing from
+  // the queue because they arrived before the cursor was set.
+  {
+    type: "POST",
+    path: "/reset-sync",
+    handler: async (_req: RouteRequest, res: RouteResponse, runtime: IAgentRuntime) => {
+      await runtime.deleteCache("pulse:gmail:last_history_id").catch(() => null);
+      console.log("[Pulse:Routes] Gmail sync cursor reset — next Sync Now will do a full fetch");
+      ok(res, { success: true, message: "Sync cursor reset. Click Sync Now to re-fetch inbox." });
     },
   },
 
@@ -912,6 +964,7 @@ export const pulseRoutes: Route[] = [
 
         recordSentDraft(subject, emailBody, db);
         scanSentEmailForCommitments(runtime, db, subject, emailBody);
+        scanSentEmailForMeetings(db, subject, emailBody, to);
         console.log(`[Pulse:Routes] Sent email for item ${itemId}, messageId=${messageId}`);
         ok(res, { success: true, messageId });
       } catch (e) {
@@ -1055,7 +1108,7 @@ export const pulseRoutes: Route[] = [
         await markReminderSent(db, saved.id, actionItem.id);
 
         console.log(`[Pulse:SlibGuard] Chat commitment logged — deadline=${c.deadline}, item=${actionItem.id}`);
-        ok(res, { saved: true, deadline: c.deadline, reminderText: title });
+        ok(res, { success: true, saved: true, deadline: c.deadline, reminderText: title });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         console.error(`[Pulse:Routes] POST /pulse/log-commitment: ${msg}`);
@@ -1439,7 +1492,7 @@ export const pulseRoutes: Route[] = [
         const endHh     = Math.floor(totalMins / 60) % 24;
         const endMm     = totalMins % 60;
         const endIso    = `${details.date}T${pad(endHh)}:${pad(endMm)}:00`;
-        const timeZone  = details.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const timeZone  = details.timeZone ?? getUserTimezone();
 
         // ── Conflict pre-check ──────────────────────────────────────────────
         // Fetch existing events and block creation if the slot is already taken.
@@ -1611,7 +1664,7 @@ export const pulseRoutes: Route[] = [
         const updated = await updateEvent(eventId, {
           start: newStart,
           end:   newEnd,
-          timeZone: timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+          timeZone: timeZone ?? getUserTimezone(),
         });
 
         const startReadable = new Date(newStart).toLocaleString("en-US", {
@@ -1774,7 +1827,7 @@ export const pulseRoutes: Route[] = [
           const endM = endTotalMin % 60;
           const newEnd = `${targetDate}T${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}:00`;
 
-          const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+          const tz = getUserTimezone();
 
           // Pre-check: make sure the target slot isn't already occupied by another event.
           const calSvcForCheck = runtime.getService(CalendarMcpService.serviceType) as CalendarMcpService | null;
@@ -1869,8 +1922,10 @@ export const pulseRoutes: Route[] = [
           : "No free slots found for that day — try a different day.";
 
         ok(res, {
-          action: "suggestions",
-          text:   `To reschedule ${target}, just tell me a time — e.g. "move it to 3pm". ${slotList}`,
+          action:      "suggestions",
+          text:        `To reschedule ${target}, just tell me a time — e.g. "move it to 3pm". ${slotList}`,
+          targetTime:  extracted.targetTime ?? null,
+          targetEvent: extracted.targetEvent,
         });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -1983,7 +2038,7 @@ export const pulseRoutes: Route[] = [
           return;
         }
 
-        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const tz = getUserTimezone();
         const updated = await updateEvent(match.id, { start: newStart, end: newEnd, timeZone: tz });
 
         const readable = new Date(newStart).toLocaleString("en-US", {
@@ -2042,6 +2097,7 @@ export const pulseRoutes: Route[] = [
         const messageId = await gmailSvc.sendEmail(to.trim(), subject.trim(), emailBody.trim(), attachments.length ? attachments : undefined);
         recordSentDraft(subject.trim(), emailBody.trim(), db);
         scanSentEmailForCommitments(runtime, db, subject.trim(), emailBody.trim());
+        scanSentEmailForMeetings(db, subject.trim(), emailBody.trim(), to.trim());
         console.log(`[Pulse:Routes] send-direct → ${to}, messageId=${messageId}`);
         ok(res, { success: true, messageId });
       } catch (e) {
@@ -2158,7 +2214,7 @@ export const pulseRoutes: Route[] = [
   {
     type: "POST" as const,
     path: "/auth/token",
-    handler: async (req: RouteRequest, res: RouteResponse, _runtime: IAgentRuntime) => {
+    handler: async (req: RouteRequest, res: RouteResponse, runtime: IAgentRuntime) => {
       const { refreshToken } = (req.body ?? {}) as { refreshToken?: string };
       if (!refreshToken?.trim()) {
         (res as unknown as { status: (c: number) => { json: (b: unknown) => void } })
@@ -2167,6 +2223,13 @@ export const pulseRoutes: Route[] = [
       }
       await saveRefreshToken(refreshToken.trim());
       ok(res, { success: true });
+      // Delay cycle slightly so the model is warm before email classification starts.
+      const bgSvc = runtime.getService(PulseBackgroundService.serviceType) as PulseBackgroundService | null;
+      setTimeout(() => {
+        bgSvc?.runProcessingCycle(true).catch((e: unknown) => {
+          console.error("[Pulse:Auth] Post-login cycle failed:", e instanceof Error ? e.message : String(e));
+        });
+      }, 10_000);
     },
   },
 
@@ -2244,7 +2307,7 @@ export const pulseRoutes: Route[] = [
   {
     type: "GET" as const,
     path: "/auth/google/callback",
-    handler: async (req: RouteRequest, res: RouteResponse, _runtime: IAgentRuntime) => {
+    handler: async (req: RouteRequest, res: RouteResponse, runtime: IAgentRuntime) => {
       const port = process.env.SERVER_PORT ?? "3000";
       const baseUrl = process.env.PULSE_PUBLIC_URL ?? `http://localhost:${port}`;
 
@@ -2297,6 +2360,14 @@ export const pulseRoutes: Route[] = [
         await saveRefreshToken(tokens.refresh_token);
         console.log("[Pulse:Auth] Refresh token saved to .eliza/pulse-auth.json");
 
+        // Delay cycle slightly so the model is warm before email classification starts.
+        const bgSvc = runtime.getService(PulseBackgroundService.serviceType) as PulseBackgroundService | null;
+        setTimeout(() => {
+          bgSvc?.runProcessingCycle(true).catch((e: unknown) => {
+            console.error("[Pulse:Auth] Post-login cycle failed:", e instanceof Error ? e.message : String(e));
+          });
+        }, 10_000);
+
         (res as unknown as { redirect: (url: string) => void })
           .redirect("/pulse/dashboard?auth=success");
       } catch (e) {
@@ -2306,6 +2377,20 @@ export const pulseRoutes: Route[] = [
         (res as unknown as { redirect: (url: string) => void })
           .redirect("/pulse/dashboard?auth=error");
       }
+    },
+  },
+
+  // ── POST /pulse/auth/logout ───────────────────────────────────────────────
+  // Clears the stored Google refresh token so the user can re-authenticate.
+  // Does NOT revoke the token at Google (user can do that in Google account settings).
+  {
+    type: "POST",
+    path: "/auth/logout",
+    public: true,
+    handler: async (_req: RouteRequest, res: RouteResponse) => {
+      await clearStoredRefreshToken();
+      console.log("[Pulse:Auth] Logged out — refresh token cleared");
+      ok(res, { success: true });
     },
   },
 ];

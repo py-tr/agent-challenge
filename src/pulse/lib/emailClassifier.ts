@@ -56,12 +56,12 @@ export interface ClassificationResult {
 
 // ─── LLM Classification ───────────────────────────────────────────────────────
 
-const CLASSIFY_SYSTEM = `You are an email triage assistant. Classify the email into exactly ONE category:
-- action-required: the user must reply or make a decision
-- follow-up: the user sent a message and received no reply; a nudge is needed
-- commitment: the sender references a future deliverable (not a priority now)
-- noise: newsletter, automated notification, marketing, or no action needed
+const CLASSIFY_SYSTEM = `You are an email triage assistant for incoming inbox messages. Classify into exactly ONE category:
+- action-required: the sender expects any response — a question, time proposal, request, approval, or decision (e.g. "How does 3pm sound?", "Can you review this?", "Are you free Thursday?", "Please confirm")
+- commitment: the sender states a future deliverable or confirms something with no question and no decision needed from the user
+- noise: newsletter, automated notification, marketing, promotional, or purely informational — zero response needed
 
+When in doubt, choose action-required.
 Reply with ONLY a single word — the category name. No punctuation, no explanation.`;
 
 // ─── Pre-LLM noise filter ─────────────────────────────────────────────────────
@@ -124,6 +124,7 @@ export async function classifyEmail(
     };
   }
 
+
   // Sanitize email-sourced fields before injecting into LLM prompt.
   const safeFrom    = msg.from.replace(/\r/g, "").slice(0, 100);
   const safeSubject = msg.subject.replace(/\r/g, "").slice(0, 200);
@@ -175,8 +176,10 @@ function parseCategory(raw: string): EmailCategory {
   if (normalised === "actionrequired" || normalised === "action_required") {
     return "action-required";
   }
-  if (normalised === "followup" || normalised === "follow_up") {
-    return "follow-up";
+  // follow-up is not a valid inbox category — map to action-required since
+  // an email with "following up" language almost always expects a reply.
+  if (normalised === "followup" || normalised === "follow_up" || normalised === "follow-up") {
+    return "action-required";
   }
   if (VALID_CATEGORIES.has(normalised as EmailCategory)) {
     return normalised as EmailCategory;

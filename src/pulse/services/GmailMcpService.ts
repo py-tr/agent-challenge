@@ -127,14 +127,14 @@ export class GmailMcpService extends Service {
    *   the last sync. On HistoryExpiredError (cursor >30 days old), falls back
    *   to a full fetch and resets the cursor.
    */
-  async fetchAndClassify(maxMessages = 20): Promise<ClassifiedEmail[]> {
+  async fetchAndClassify(maxMessages = 20, forceFull = false): Promise<ClassifiedEmail[]> {
     const storedHistoryId = await this.runtime.getCache<string>(HISTORY_ID_KEY);
 
     let messages: GmailMessage[];
     let newHistoryId: string;
 
-    if (!storedHistoryId) {
-      // ── Initial full fetch ───────────────────────────────────────────────
+    if (!storedHistoryId || forceFull) {
+      // ── Initial full fetch (or forced by Sync Now) ───────────────────────
       messages = await this.fullFetch(maxMessages);
       if (messages.length === 0) return [];
 

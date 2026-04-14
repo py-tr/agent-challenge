@@ -1,6 +1,6 @@
-# Pulse — Autonomous Chief of Staff
+# Pulse — Personal AI Chief of Staff
 
-> Reads your inbox. Guards your commitments. Runs on Nosana GPU. Nothing leaves without your approval.
+> Reads your inbox. Guards your commitments. Proposes every action. You approve or reject — nothing executes automatically.
 
 ![ElizaOS](./assets/NosanaXEliza.jpg)
 
@@ -8,140 +8,142 @@
 
 ---
 
-## The Problem
+## By the Numbers
 
-Email is where good intentions go to die. You write "I'll have this to you by Friday" — and Friday arrives without a trace. You accept two meetings at the same time without noticing. Important threads get buried under newsletters.
-
-Pulse runs on a Nosana GPU node, processes your Gmail and Google Calendar on a schedule, and builds a prioritized action queue. You open the dashboard and make decisions with one click. Nothing is auto-sent — that's a feature, not a limitation.
+| | |
+|---|---|
+| **92 tests** across 8 files — in-memory PGLite, zero mocks | **6 ElizaOS Actions** dispatched by the LLM |
+| **5 ElizaOS Services** running autonomously | **3 ElizaOS Providers** injecting context into every prompt |
+| **2 ElizaOS Evaluators** (one `alwaysRun: true`) | **Real Gmail + Google Calendar** — not simulated |
+| **Nosana GPU inference** for all LLM calls | **Docker** — single container, cold-start safe |
 
 ---
 
-## What Makes Pulse Different
+## Demo
 
-| Feature | What it does |
+🎥 **[Watch 60-second demo video →](https://youtu.be/TODO)**
+
+**Full flow in 4 steps:**
+1. Email arrives in Gmail → Pulse classifies it and drafts a reply
+2. Calendar conflict detected → Pulse proposes a resolution
+3. You wrote *"I'll send this by Friday"* → Slib Guard creates a reminder
+4. You approve/reject each item with one click — nothing was auto-sent
+
+---
+
+## The Problem
+
+Knowledge workers spend ~2.5 hours/day on email. The real cost isn't reading — it's deciding: *Does this need a reply? Did I forget that commitment? Am I double-booked?*
+
+Pulse runs autonomously on a Nosana GPU node and makes those decisions for you — then waits for your approval before doing anything. It's the difference between a tool that acts *on* you and one that acts *for* you.
+
+---
+
+## What Pulse Does
+
+| Feature | Description |
 |---------|-------------|
-| **Slib Guard** | Scans every outgoing message for commitment language — *"I'll send this by Friday"*, *"Let's sync next week"*. Creates a reminder 24h before the deadline. You promised it; Pulse remembers it. |
-| **Decision Memory** | Every approve/reject is stored. After 10+ decisions, Pulse surfaces your patterns: *"You approve 87% of email drafts, reject 60% of reschedule suggestions."* |
-| **Approval Queue** | Every proposed action sits in queue until you explicitly approve it. Email drafts, calendar reschedules, follow-up reminders — nothing executes automatically. |
-| **Calendar Conflict Detection** | Finds overlapping events. Proposes a resolution. You pick which one moves. |
-| **Real-Time Web Search** | `WebSearchProvider` injects live web data into LLM context *before* generation. Only activates when you explicitly ask to search — e.g. "search for X" or "look up Y online". Routes weather to wttr.in, general queries to DuckDuckGo. |
-| **Smart Reply Suggestions** | Three LLM-generated reply pills appear on every email card. One click pre-fills the draft drawer — then edit and send. Keyword fallback works even when LLM is unavailable. |
-| **Pulse Score** | 0–100 inbox health score rendered as an SVG ring in the sidebar. Formula: decisiveness × 40 + queue clarity × 35 + commitment reliability × 25. Green above 70, amber 40–70, red below 40. |
-| **PDF Upload + Attachment** | Attach any PDF in the chat. Pulse extracts the text server-side, runs a structured LLM analysis (summary, action items, deadlines, risks), and injects doc context into follow-up questions. Say "send the summary to x@y.com" — an LLM intent classifier detects the request and drafts the email automatically. |
-| **Draft Style Memory** | The last 10 emails you actually sent are stored in memory. `/draft-assist` injects them as style examples — over time Pulse learns to write drafts that sound like you. |
-| **Calendar Q&A** | Ask "what's on my calendar this week?" — Pulse fetches real events via the `/pulse/calendar-context` route and injects them into the LLM prompt before generation. No hallucinated schedules. |
-| **Google OAuth Relay** | A static relay on GitHub Pages (`py-tr.github.io/agent-challenge/oauth-relay.html`) handles the OAuth redirect so any Pulse deployment (local or Nosana) can use a single registered redirect URI. |
-| **Morning Briefing + Voice** | On startup, Pulse posts a prioritized briefing of pending queue items. Hit "Listen" to hear it read aloud via the Web Speech API. |
-| **Follow-Up Detection** | Scans your SENT folder for emails with no reply in 3+ days. Creates follow_up queue items so nothing slips through. |
-| **Meeting Prep** | `"prepare me for the Q2 review"` — Pulse finds the event, pulls recent email threads with attendees, and generates a 5-8 bullet prep brief. Uses real calendar data — not hallucinated. |
-| **AI Email Summaries** | Every email draft card auto-fetches a 1-2 sentence AI summary. No clicking into the thread — the key ask is surfaced immediately. |
-| **Analytics** | 7-day bar chart (approved vs rejected), per-type approval rates, and summary cards. Visualizes your decision patterns over time. |
-| **Focus Mode** | One item at a time, full-screen. Keyboard-friendly: approve / reject / dismiss. Zero distraction when inbox is overwhelming. |
+| **Email Triage** | Fetches Gmail, classifies each message (action-required / commitment / noise), and drafts a reply scaffold. Only actionable emails enter the queue. |
+| **Slib Guard** | Scans every *outgoing* email for commitment language — *"I'll send this by Friday"*, *"Let's sync next week"*. Logs a reminder 24h before the deadline. You promised it; Pulse remembers it. |
+| **Calendar Conflict Detection** | Finds overlapping events in the next 14 days. Proposes which one to reschedule and suggests free slots. |
+| **Approval Queue** | Every proposed action — email reply, calendar reschedule, follow-up nudge — sits in queue until you explicitly approve it. Nothing auto-executes. |
+| **Decision Memory** | Every approve/reject is stored. After 10+ decisions, Pulse surfaces patterns: *"You approve 87% of email drafts, reject 60% of reschedule requests."* |
+| **Follow-Up Detection** | Scans your SENT folder for emails with no reply. Creates follow-up queue items so nothing falls through the cracks. |
+| **Morning Briefing** | On startup, posts a prioritized summary of pending items, today's calendar, and due commitments. Hit "Listen" to hear it read aloud. |
+| **Meeting Prep** | *"Prepare me for the Q2 review"* — Pulse finds the event, pulls recent email threads with attendees, and generates a bullet-point prep brief from real data. |
+| **Calendar Q&A** | *"What's on my calendar this week?"* — fetches real events and injects them into the LLM prompt. No hallucinated schedules. |
+| **Weather** | *"Which day has the best weather for golf this week?"* — routes to wttr.in, no API key required. |
+| **PDF Analysis** | Upload any PDF in chat. Pulse extracts text, runs structured LLM analysis (summary, action items, risks), and injects doc context into follow-up questions. |
+| **Draft Style Memory** | The last 10 emails you actually sent are stored. `/draft-assist` injects them as style examples — Pulse learns to write like you over time. |
+| **Inbox Health Score** | 0–100 score (SVG ring in sidebar) based on decisiveness, queue depth, and commitment reliability. Green / amber / red. |
+| **Analytics** | 7-day bar chart (approved vs rejected), per-type approval rates, and pattern summary after 10+ decisions. |
+| **Focus Mode** | One item at a time, full-screen. Keyboard shortcuts: A approve · R reject · J/K navigate. |
+| **Google OAuth Relay** | Static relay on GitHub Pages handles the OAuth redirect so any Pulse deployment (local or Nosana) uses a single registered URI. |
+
+---
+
+## How It Works
+
+```
+Gmail ──► GmailMcpService ──► emailClassifier (LLM) ──► action_items table
+                                                              │
+Google Calendar ──► CalendarMcpService ──► conflictDetector ──┘
+                                                              │
+                                                    Approval Queue (React UI)
+                                                              │
+                                          User: Approve ──► Gmail send / Calendar update
+                                          User: Reject  ──► logged to decisions table
+```
+
+**Background cycle runs every 6 hours automatically:**
+- Fetch new Gmail messages via History API (incremental, cursor-based)
+- Classify each message with the Qwen LLM
+- Scan next 14 days of calendar for conflicts
+- Fire Slib Guard reminders for due commitments
+- Update inbox health score
+
+**Manual triggers available:** "Check my emails", "Scan for conflicts", Sync Now button.
 
 ---
 
 ## ElizaOS Integration
 
-Pulse uses every major ElizaOS abstraction — this is a full plugin implementation, not a wrapper.
+Pulse is a full ElizaOS plugin — every major framework abstraction is used: Services, Actions, Providers, Evaluators, Task Workers, custom Model Handlers, and the Service Registry. The background processing loop runs autonomously through the ElizaOS task system — no user prompt required.
 
 ```
 src/pulse/
 ├── index.ts                        # Plugin barrel: assembles all pieces + custom model handler
 ├── services/
-│   ├── PulseBackgroundService.ts   # Service: 6-hour processing loop (Gmail + Calendar)
-│   ├── GmailMcpService.ts          # Service: MCP client + 30-min token refresh heartbeat
-│   ├── CalendarMcpService.ts       # Service: Calendar MCP wrapper with response caching
+│   ├── PulseBackgroundService.ts   # Service: 6-hour autonomous processing loop
+│   ├── GmailMcpService.ts          # Service: Gmail client + 30-min token refresh heartbeat
+│   ├── CalendarMcpService.ts       # Service: Calendar client with response caching
 │   ├── MorningBriefingService.ts   # Service: startup briefing posted to chat
 │   └── DailySummaryService.ts      # Service: evening decision-pattern summary
 ├── evaluators/
-│   ├── SlibGuardEvaluator.ts       # Evaluator (alwaysRun: true): scans every message for commitments
-│   └── WeatherContextEvaluator.ts  # Evaluator: caches weather data so follow-ups skip re-search
+│   ├── SlibGuardEvaluator.ts       # Evaluator (alwaysRun: true): commitment detection on every message
+│   └── WeatherContextEvaluator.ts  # Evaluator: caches weather data for follow-up questions
 ├── providers/
 │   ├── ActionQueueProvider.ts      # Provider: injects pending queue into every LLM prompt
 │   ├── DecisionHistoryProvider.ts  # Provider: last 10 decisions + approval-rate patterns
 │   └── WebSearchProvider.ts        # Provider: real-time web data injection before generation
 ├── actions/
-│   ├── ProcessEmailsAction.ts      # Action: manually trigger Gmail processing
-│   ├── DetectConflictsAction.ts    # Action: manually trigger calendar scan
+│   ├── ProcessEmailsAction.ts      # Action: trigger Gmail fetch + classify cycle
+│   ├── DetectConflictsAction.ts    # Action: trigger calendar conflict scan
 │   ├── DetectFollowUpsAction.ts    # Action: scan SENT folder for no-reply threads
-│   ├── MeetingPrepAction.ts        # Action: generate meeting prep brief from Calendar + Gmail
-│   ├── WebSearchAction.ts          # Action: DuckDuckGo + wttr.in, no API key required
+│   ├── MeetingPrepAction.ts        # Action: generate meeting prep brief
+│   ├── WebSearchAction.ts          # Action: DuckDuckGo + wttr.in
 │   └── CreateCalendarEventAction.ts # Action: create Google Calendar events via chat
 ├── routes/
-│   └── pulseRoutes.ts              # Routes: REST API (/pulse/queue, approve, reject, status)
+│   └── pulseRoutes.ts              # REST API: queue, approve, reject, status, analytics
 ├── lib/
-│   └── llmFallback.ts              # Inference fallback: Ollama (primary) → Nosana endpoint
+│   └── llmFallback.ts              # Inference: Ollama (primary) → Nosana endpoint (fallback)
 └── db/
     ├── schema.ts                   # Drizzle ORM table definitions (PGLite)
     ├── migrations.ts               # IF NOT EXISTS migrations — safe on cold Nosana boot
-    └── queries.ts                  # Typed CRUD — no raw SQL anywhere
+    └── queries.ts                  # Typed CRUD — no raw SQL
 ```
 
-**Plugin registration highlights:**
-
-- **5 Services** — `GmailMcpService`, `CalendarMcpService`, `PulseBackgroundService`, `MorningBriefingService`, `DailySummaryService`
-- **3 Providers** — `ActionQueueProvider`, `DecisionHistoryProvider`, `WebSearchProvider` — queue state, decision history, and live web data injected into every prompt
-- **2 Evaluators** — `SlibGuardEvaluator` (alwaysRun: true, commitment detection) + `WeatherContextEvaluator` (caches weather data for follow-up questions without re-searching)
-- **6 Actions** — `ProcessEmailsAction`, `DetectConflictsAction`, `DetectFollowUpsAction`, `MeetingPrepAction`, `WebSearchAction`, `CreateCalendarEventAction`
-- **REST Routes** — full CRUD API for the React dashboard, plus direct LLM endpoints (`/pulse/draft-assist`, `/pulse/classify-intent`, `/pulse/upload`) that bypass ElizaOS session overhead for latency-sensitive operations
-- **Custom model handler** — `priority: 1` overrides `plugin-openai` to POST directly to `/v1/chat/completions`, bypassing `@ai-sdk/openai`'s Responses API default (which Nosana nodes don't support)
+**Registration summary:**
+- **5 Services** — autonomous background processing, email, calendar, briefing, summary
+- **3 Providers** — queue state, decision history, and live web data injected into every prompt
+- **2 Evaluators** — SlibGuard (`alwaysRun: true`) + WeatherContext
+- **6 Actions** — email processing, conflict detection, follow-up detection, meeting prep, web search, calendar creation
+- **Custom model handler** (`priority: 1`) — overrides `plugin-openai` to POST to `/v1/chat/completions` instead of `/v1/responses`, making Pulse work on every Nosana node
 
 ---
 
 ## Nosana Integration
 
-### Custom Chat Completions Handler
-
-`plugin-openai` v2 routes all inference through `/v1/responses` — a newer API endpoint that Nosana's GPU nodes don't expose. Pulse registers its own `TEXT_SMALL` and `TEXT_LARGE` model handlers at `priority: 1`, which POST directly to `/v1/chat/completions`:
-
-```typescript
-// src/pulse/index.ts
-models: {
-  [ModelType.TEXT_SMALL]: async (runtime, params) => callChatCompletions(runtime, model, params),
-  [ModelType.TEXT_LARGE]: async (runtime, params) => callChatCompletions(runtime, model, params),
-}
-```
-
-This makes Pulse work on **any Nosana node** without modification — not just nodes that expose newer API surfaces.
-
-### GPU Inference Counter
-
-Every successful LLM call increments a persistent counter via `nosanaMetrics.ts`. The `/pulse/status` endpoint exposes:
-
-```json
-{
-  "nosana": {
-    "nodeId": "3gsrmj...",
-    "isNosanaNode": true,
-    "llmCallCount": 47,
-    "avgLatencyMs": 812,
-    "tokensPerSec": 94.3,
-    "totalTokensEstimated": 12400,
-    "estimatedCostUsd": 0.0004,
-    "uptimeMs": 86400000,
-    "jobType": "morning",
-    "modelName": "qwen2.5:14b"
-  }
-}
-```
-
-The sidebar GPU panel renders the model name, inference count, average latency, uptime, and job type. `avgLatencyMs` is an exponential moving average (α = 0.2) computed from wall-clock durations of each inference call.
-
-### Local-First Inference (Ollama)
-
-Pulse runs a local Ollama instance inside the container as the **primary** inference backend, with the Nosana-hosted endpoint as a fallback.
+### Deployment Architecture
 
 ```
-Ollama (local, GPU-accelerated)  →  Nosana endpoint (fallback)
+Nosana GPU Node
+├── Ollama :11434 (qwen2.5:14b, GPU-accelerated)   ← primary inference
+└── ElizaOS Agent :3000                             ← serves frontend + API
+    └── llmFallback.ts: Ollama → Nosana endpoint fallback
 ```
 
-The fallback chain is implemented in `src/pulse/lib/llmFallback.ts` and wraps every `runtime.useModel()` call across the plugin.
-
-**`SKIP_OLLAMA=true`** — set this to skip Ollama entirely and route all inference directly to `OPENAI_API_URL`. Useful when deploying to a market where the model is already a required resource on every node, giving instant availability without a pull.
-
-### Deployment
-
-Two Nosana job definitions in `nos_job_def/` — morning (6am) and evening (9pm) processing runs, both using `pytrdev/pulse-agent:latest`.
+All LLM inference (email classification, draft generation, chat, meeting prep) runs on the Nosana GPU. Two job definitions in `nos_job_def/` — morning and evening processing runs.
 
 ```bash
 nosana job post \
@@ -150,114 +152,115 @@ nosana job post \
   --timeout 60
 ```
 
-On first boot, the container starts Ollama, pulls `qwen2.5:14b` (~9GB), then launches the agent. The health check `start-period` is set to 300s to accommodate this. Subsequent starts on the same node are near-instant if the node has cached the model (24h cache lifetime per Nosana's caching policy).
+### Custom Chat Completions Handler
 
-**Tip:** Check if your target market has `qwen2.5:14b` as a required resource — if it does, the pull is instant on any node in that market:
+`plugin-openai` v2 defaults to `/v1/responses` — an API surface Nosana nodes don't expose. Pulse registers its own model handlers at `priority: 1` that POST directly to `/v1/chat/completions`:
+
+```typescript
+models: {
+  [ModelType.TEXT_SMALL]: async (runtime, params) => callChatCompletions(runtime, model, params),
+  [ModelType.TEXT_LARGE]: async (runtime, params) => callChatCompletions(runtime, model, params),
+}
 ```
-https://dashboard.k8s.prd.nos.ci/api/markets/<Market-Address>/required-resources
+
+This makes Pulse work on **any Nosana node** without modification.
+
+### `SKIP_OLLAMA=true` Mode
+
+Set this to skip the local Ollama instance and route all inference directly to `OPENAI_API_URL`. Useful when deploying to a market where the model is already a required resource — gives instant availability without a model pull.
+
+### GPU Metrics
+
+Every inference call is tracked. The sidebar panel shows:
+
+```json
+{
+  "nodeId": "3gsrmj...",
+  "isNosanaNode": true,
+  "llmCallCount": 47,
+  "avgLatencyMs": 812,
+  "tokensPerSec": 94.3,
+  "modelName": "qwen2.5:14b",
+  "uptimeMs": 86400000
+}
 ```
+
+`avgLatencyMs` is an exponential moving average (α = 0.2) computed from wall-clock inference durations.
 
 ---
 
 ## Quick Start
 
+### Without Google credentials (demo mode)
+
 ```bash
-# Clone and install
 git clone https://github.com/py-tr/agent-challenge
 cd agent-challenge && git checkout elizaos-challenge
-cp .env.example .env   # fill in credentials — see table below
-pnpm install
-
-# Run agent (backend on :3000) + frontend (HMR on :5173)
-pnpm dev:hot
-
-# Or: backend only (frontend built into /dist-frontend and served by agent)
-pnpm dev
+cp .env.example .env
+pnpm install && pnpm dev
 ```
 
-Open `http://localhost:5173` — the dashboard connects automatically.
+Open `http://localhost:5173`. Pulse auto-seeds a full demo dataset — inbox queue, calendar conflicts, Slib Guard reminders, 7 days of analytics. Everything is fully interactive without connecting any Google account.
 
-### Try it without Google credentials
+### With real Gmail + Google Calendar
 
-No Gmail or Calendar setup? No problem. If `GOOGLE_REFRESH_TOKEN` is not set, Pulse automatically seeds the dashboard with realistic demo data on first boot — a full inbox queue, calendar conflicts, Slib Guard reminders, and 7 days of analytics history. Everything is fully interactive: approve items, reject them, chat with the agent, try meeting prep — all without connecting a real account.
+1. Create OAuth 2.0 credentials at [console.cloud.google.com](https://console.cloud.google.com)
+2. Add redirect URI: `https://py-tr.github.io/agent-challenge/oauth-relay.html`
+3. Enable Gmail API + Google Calendar API
+4. Add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to `.env`
+5. Open the dashboard → click **Sign in with Google**
 
-| Scenario | What happens |
-|----------|-------------|
-| No `GOOGLE_REFRESH_TOKEN` | Demo data seeded automatically — dashboard is populated on first launch |
-| `PULSE_SEED_ON_START=true` | Force demo seed even when credentials are present (useful for testing) |
-| `PULSE_SEED_ON_START=false` | Never seed — start with an empty dashboard regardless |
-| `GOOGLE_REFRESH_TOKEN` set | Real Gmail + Calendar data only, no seeding |
-
-Demo data is only inserted when the queue is empty, so it never overwrites real items.
+| Scenario | Behaviour |
+|----------|-----------|
+| No `GOOGLE_REFRESH_TOKEN` | Demo data auto-seeded on first boot |
+| `PULSE_SEED_ON_START=true` | Force seed even with credentials |
+| `PULSE_SEED_ON_START=false` | Never seed |
+| `GOOGLE_REFRESH_TOKEN` set | Real Gmail + Calendar only |
 
 ---
 
 ## Environment Variables
 
-**Inference** (Ollama is primary; `OPENAI_*` used as fallback or when `SKIP_OLLAMA=true`)
+**Inference**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OLLAMA_MODEL` | `qwen2.5:14b` | Model pulled and served by local Ollama |
-| `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Ollama API base URL |
-| `SKIP_OLLAMA` | `false` | Set `true` to skip Ollama and route all inference to `OPENAI_API_URL` |
-| `OPENAI_API_KEY` | — | Inference API key for fallback endpoint (`nosana` for Nosana nodes) |
-| `OPENAI_API_URL` | — | Fallback inference endpoint, e.g. `https://<node>.nos.ci/v1` |
-| `OPENAI_SMALL_MODEL` | `qwen2.5:14b` | Model name for fallback endpoint |
-| `OPENAI_LARGE_MODEL` | `qwen2.5:14b` | Model name for fallback endpoint |
+| `OLLAMA_MODEL` | `qwen2.5:14b` | Model served by local Ollama |
+| `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Ollama API base |
+| `SKIP_OLLAMA` | `false` | Route all inference to `OPENAI_API_URL` directly |
+| `OPENAI_API_KEY` | — | API key for fallback endpoint (`nosana` for Nosana nodes) |
+| `OPENAI_API_URL` | — | Fallback endpoint, e.g. `https://<node>.nos.ci/v1` |
+| `OPENAI_SMALL_MODEL` | `qwen2.5:14b` | Model name at fallback endpoint |
+| `OPENAI_LARGE_MODEL` | `qwen2.5:14b` | Model name at fallback endpoint |
 
 **Google / Auth**
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GOOGLE_CLIENT_ID` | — | Google OAuth client ID — enables "Sign in with Google" button |
-| `GOOGLE_CLIENT_SECRET` | — | Google OAuth client secret |
-| `GOOGLE_REFRESH_TOKEN` | — | Long-lived refresh token — set directly to skip the OAuth flow |
-| `PULSE_PUBLIC_URL` | — | Public base URL for OAuth redirect (e.g. `https://your-node.nos.ci`) |
+| Variable | Description |
+|----------|-------------|
+| `GOOGLE_CLIENT_ID` | OAuth client ID — enables Sign in with Google |
+| `GOOGLE_CLIENT_SECRET` | OAuth client secret |
+| `GOOGLE_REFRESH_TOKEN` | Long-lived refresh token — skips OAuth flow |
+| `PULSE_PUBLIC_URL` | Public base URL for OAuth redirect |
 
 **General**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SERVER_PORT` | `3000` | Backend port |
-| `PULSE_JOB_TYPE` | — | `morning` or `evening` — logged in metrics, used by Nosana job definitions |
-| `PULSE_SEED_ON_START` | — | `true` = always seed demo data; `false` = never seed; unset = seed only when no Google credentials |
-| `EMBEDDING_PROVIDER` | — | Set to `none` — embeddings not required by Pulse |
-
-### Google Authentication
-
-Pulse supports two ways to connect Google:
-
-1. **"Sign in with Google" button** — works on any deployment (local or Nosana) via a static OAuth relay hosted on GitHub Pages. Register **one** redirect URI in Google Cloud Console and it works everywhere:
-   ```
-   https://py-tr.github.io/agent-challenge/oauth-relay.html
-   ```
-   The relay receives the Google callback and forwards the auth code back to whichever Pulse instance started the flow (encoded in the OAuth `state` parameter).
-
-2. **`GOOGLE_REFRESH_TOKEN` env var** — set directly in `.env` or the Nosana job definition. Takes priority over the OAuth flow. Useful for headless/automated deployments.
-
-**One-time Google Cloud setup:**
-- Create an OAuth 2.0 Client ID at [console.cloud.google.com](https://console.cloud.google.com) → APIs & Services → Credentials
-- Add authorized redirect URI: `https://py-tr.github.io/agent-challenge/oauth-relay.html`
-- Enable Gmail API + Google Calendar API
-- Copy Client ID + Secret into `.env`
+| `PULSE_JOB_TYPE` | — | `morning` or `evening` — logged in GPU metrics |
+| `PULSE_SEED_ON_START` | — | `true` / `false` / unset |
+| `EMBEDDING_PROVIDER` | — | Set to `none` — embeddings not used |
 
 ---
 
-## Docker Deployment
+## Docker
 
 ```bash
-# Build
 docker build -t pytrdev/pulse-agent:latest .
-
-# Run locally (agent + frontend served on :3000)
 docker run -p 3000:3000 --env-file .env pytrdev/pulse-agent:latest
-
-# Push to registry
-docker push pytrdev/pulse-agent:latest
 ```
 
-The frontend is compiled into `/srv/pulse-frontend/` at build time and served as static files by the ElizaOS HTTP server — no separate frontend container needed. The Nosana volume mount on `/app` doesn't interfere.
+Frontend is compiled into `/srv/pulse-frontend/` at build time and served by the ElizaOS HTTP server — no separate container needed. The Nosana `/app` volume mount doesn't interfere.
 
 ---
 
@@ -267,72 +270,83 @@ The frontend is compiled into `/srv/pulse-frontend/` at build time and served as
 pnpm test
 ```
 
-92 tests across 8 files — all using in-memory PGLite, no external dependencies, no mocked database:
+**Integration test script** (requires agent running on `:3000`):
+
+```bash
+# macOS / Linux
+bash test_pulse.sh
+
+# Windows — use Git Bash, not PowerShell
+# Open Git Bash from Start menu, or in VS Code terminal dropdown select "Git Bash"
+bash test_pulse.sh
+```
+
+**92 tests across 8 files** — all using in-memory PGLite, zero external dependencies, zero mocks. Every core pipeline is covered: commitment extraction, email classification, conflict detection, DB persistence, prompt sanitization, and Nosana metrics.
 
 ```
-src/pulse/tests/slibGuard.test.ts         18 tests  commitment extraction + deadline timing
-src/pulse/tests/actionQueue.test.ts        8 tests  approve/reject + status persistence
-src/pulse/tests/emailClassifier.test.ts    6 tests  LLM categorization + priority assignment
-src/pulse/tests/conflictDetector.test.ts   7 tests  overlap detection + resolution proposals
-src/pulse/tests/providers.test.ts          6 tests  provider output format + context injection
-src/pulse/tests/persistence.test.ts        2 tests  DB migrations + CRUD round-trips
-src/pulse/tests/routeHelpers.test.ts      24 tests  sanitizeForPrompt, isValidEmail, recordSentDraft
-src/pulse/tests/nosanaMetrics.test.ts     21 tests  inference counter, EMA latency, formatUptime, security
+slibGuard.test.ts          18 tests  commitment extraction + deadline timing
+actionQueue.test.ts         8 tests  approve/reject + status persistence
+emailClassifier.test.ts     6 tests  LLM categorization + priority assignment
+conflictDetector.test.ts    7 tests  overlap detection + resolution proposals
+providers.test.ts           6 tests  provider output format + context injection
+persistence.test.ts         2 tests  DB migrations + CRUD round-trips
+routeHelpers.test.ts       24 tests  sanitizeForPrompt, isValidEmail, recordSentDraft
+nosanaMetrics.test.ts      21 tests  inference counter, EMA latency, formatUptime
 ```
 
 ---
 
-## Architecture Diagram
+## Architecture
 
 ```
-┌──────────────────────────────── Nosana GPU Node ─────────────────────────────────┐
-│                                                                                   │
-│  ┌── Ollama :11434 ──────────────────┐                                           │
-│  │  qwen2.5:14b (GPU-accelerated)    │◄── llmFallback.ts (primary)               │
-│  └───────────────────────────────────┘                                           │
-│                                                                                   │
-│  ┌─────────────────────────── ElizaOS Runtime ───────────────────────────────┐   │
-│  │                                                                            │   │
-│  │   Services              Providers              Evaluators                  │   │
-│  │   ─────────             ─────────              ──────────                  │   │
-│  │   PulseBackground  →    ActionQueue     →    SlibGuard (alwaysRun)         │   │
-│  │   GmailMcp         →    DecisionHistory      WeatherContext                │   │
-│  │   CalendarMcp      →    WebSearch                                          │   │
-│  │   MorningBriefing                                                          │   │
-│  │   DailySummary                                                             │   │
-│  │                                                                            │   │
-│  │   Actions                Routes                DB                          │   │
-│  │   ───────                ──────                ──                          │   │
-│  │   ProcessEmails          /pulse/queue          PGLite                      │   │
-│  │   DetectConflicts        /pulse/approve        action_items                │   │
-│  │   DetectFollowUps        /pulse/reject         commitments                 │   │
-│  │   MeetingPrep            /pulse/status         decisions                   │   │
-│  │   WebSearch              /pulse/decisions                                  │   │
-│  │   CreateCalendarEvent    /pulse/analytics                                  │   │
-│  └────────────────────────────────────────────────────────────┬───────────────┘   │
-│                                                               │ :3000             │
-└───────────────────────────────────────────────────────────────┼───────────────────┘
-                                                                │
-                                                       ┌────────▼────────┐
-                                                       │  React + Vite   │
-                                                       │  Dashboard      │
-                                                       │  :5173 / :3000  │
-                                                       └─────────────────┘
+┌──────────────────────────── Nosana GPU Node ──────────────────────────────┐
+│                                                                            │
+│  ┌── Ollama :11434 ─────────────────┐                                     │
+│  │  qwen2.5:14b (GPU-accelerated)   │◄── llmFallback.ts (primary)         │
+│  └──────────────────────────────────┘                                     │
+│                                                                            │
+│  ┌──────────────────── ElizaOS Runtime ──────────────────────────────┐    │
+│  │                                                                    │    │
+│  │  Services              Providers            Evaluators             │    │
+│  │  ─────────             ─────────            ──────────             │    │
+│  │  PulseBackground  ──►  ActionQueue    ──►   SlibGuard (alwaysRun)  │    │
+│  │  GmailMcp         ──►  DecisionHistory      WeatherContext         │    │
+│  │  CalendarMcp      ──►  WebSearch                                   │    │
+│  │  MorningBriefing                                                   │    │
+│  │  DailySummary                                                      │    │
+│  │                                                                    │    │
+│  │  Actions                Routes               DB (PGLite)           │    │
+│  │  ───────                ──────               ───────────           │    │
+│  │  ProcessEmails          /pulse/queue         action_items          │    │
+│  │  DetectConflicts        /pulse/approve       commitments           │    │
+│  │  DetectFollowUps        /pulse/reject        decisions             │    │
+│  │  MeetingPrep            /pulse/status                              │    │
+│  │  WebSearch              /pulse/analytics                           │    │
+│  │  CreateCalendarEvent    /pulse/briefing                            │    │
+│  └──────────────────────────────────────────────┬─────────────────────┘    │
+│                                                 │ :3000                    │
+└─────────────────────────────────────────────────┼────────────────────────┘
+                                                  │
+                                         ┌────────▼────────┐
+                                         │  React + Vite   │
+                                         │  Dashboard      │
+                                         │  :5173 / :3000  │
+                                         └─────────────────┘
 ```
 
 ---
 
 ## Key Design Decisions
 
-**No auto-send.** The approval queue is the product. Every action Pulse proposes sits in queue until explicitly approved. This makes Pulse trustworthy by design — it can't do damage without you.
+**No auto-send.** The approval queue is the product. Every action Pulse proposes sits in queue until explicitly approved — email drafts, calendar reschedules, follow-up nudges. This makes Pulse safe by design.
 
-**MCP-first, googleapis fallback.** `gmailClient.ts` tries MCP first; falls back to direct `googleapis` calls on failure. Callers see an identical interface. Works in any environment.
+**Autonomous background loop.** `PulseBackgroundService` runs every 6 hours without any user prompt — fetches Gmail via incremental History API, scans calendar, fires reminders. This is the "agent" part: it acts on your behalf while you're away.
 
-**Providers over action callbacks.** `WebSearchProvider` fetches live data and injects it into the LLM prompt *before* generation — not after via action callbacks. The model always has real data when it starts composing a response.
+**PGLite over PostgreSQL.** No external database. Schema managed with Drizzle ORM, `IF NOT EXISTS` migrations on every boot. Works from a clean cold start on any Nosana node.
 
-**PGLite over PostgreSQL.** No external database. Schema managed with Drizzle ORM, `IF NOT EXISTS` migrations run on every boot. Works from a clean cold start on any Nosana node.
+**MCP-first, REST fallback.** `gmailClient.ts` tries Gmail MCP first; falls back to direct REST calls. Callers see an identical interface regardless of which path succeeded.
 
-**Ollama-first inference.** `llmFallback.ts` wraps every `runtime.useModel()` call. Ollama runs locally on the same GPU node, so inference is fast and fully under our control. The Nosana-hosted endpoint serves as a fallback — no code changes needed to switch between them.
+**Providers over action callbacks.** `WebSearchProvider` fetches live data and injects it into the LLM prompt *before* generation — the model has real data when it starts composing, not after.
 
 ---
 

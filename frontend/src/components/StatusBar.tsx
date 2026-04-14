@@ -60,9 +60,6 @@ function NosanaBadge({ nosana }: { nosana: NosanaMetrics }) {
           <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-500" />
         </span>
         <span className="text-sm font-semibold text-green-800">Running on Nosana GPU</span>
-        <span className="font-mono text-xs text-green-600" title={nosana.nodeId ?? ""}>
-          {shortNodeId(nosana.nodeId)}
-        </span>
       </div>
 
       {/* Secondary stats */}

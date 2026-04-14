@@ -1,4 +1,4 @@
-import { Inbox, Clock, Shield, BarChart2 } from "lucide-react";
+import { Inbox, Clock, Shield, BarChart2, LogOut } from "lucide-react";
 import type { StatusResponse } from "../api/pulseApi";
 
 export type SidebarView = "queue" | "history" | "commitments" | "analytics";
@@ -9,6 +9,8 @@ interface Props {
   pendingCount: number;
   committedCount: number;
   status: StatusResponse | null;
+  isGoogleConnected?: boolean;
+  onLogout?: () => void;
 }
 
 function formatUptime(ms: number): string {
@@ -78,7 +80,7 @@ function InboxHealthWidget({ score }: { score: number | undefined }) {
   );
 }
 
-export function Sidebar({ activeView, onNavigate, pendingCount, committedCount, status }: Props) {
+export function Sidebar({ activeView, onNavigate, pendingCount, committedCount, status, isGoogleConnected, onLogout }: Props) {
   const nosana = status?.nosana;
 
   const navItems: { id: SidebarView; label: string; icon: React.ReactNode; count?: number }[] = [
@@ -118,9 +120,8 @@ export function Sidebar({ activeView, onNavigate, pendingCount, committedCount, 
             className="flex h-7 w-7 items-center justify-center rounded-md text-white"
             style={{ backgroundColor: "#4f46e5" }}
           >
-            <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-              <path d="M10 2a1 1 0 011 1v6.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L9 9.586V3a1 1 0 011-1z" />
-              <path d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" />
+            <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
             </svg>
           </div>
           <div>
@@ -203,11 +204,6 @@ export function Sidebar({ activeView, onNavigate, pendingCount, committedCount, 
                 </>
               )}
 
-              <span className="text-[10px]" style={{ color: "#64748b" }}>Node</span>
-              <span className="font-mono text-[10px] text-right" style={{ color: "#94a3b8" }}>
-                {shortNodeId(nosana.nodeId)}
-              </span>
-
               <span className="text-[10px]" style={{ color: "#64748b" }}>Inferences</span>
               <span className="font-mono text-[10px] text-right" style={{ color: "#94a3b8" }}>
                 {nosana.llmCallCount}
@@ -277,6 +273,17 @@ export function Sidebar({ activeView, onNavigate, pendingCount, committedCount, 
             </div>
           </div>
         )}
+      {isGoogleConnected && onLogout && (
+        <div className="px-3 pb-3">
+          <button
+            onClick={onLogout}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition-colors"
+          >
+            <LogOut size={13} />
+            Sign out of Google
+          </button>
+        </div>
+      )}
       </div>
     </aside>
   );

@@ -121,7 +121,7 @@ export const processEmailsAction: Action = {
         return { success: false, error: errMsg };
       }
 
-      const result = await bgService.runProcessingCycle();
+      const result = await bgService.runProcessingCycle(true);
 
       const parts: string[] = [];
       if (result.emails.inserted > 0)

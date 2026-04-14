@@ -16,6 +16,7 @@
 
 import { fileURLToPath } from "node:url";
 import { refreshAccessToken } from "./gmailClient.js";
+import { getUserTimezone } from "./userTimezone.js";
 
 // ─── Public Types ─────────────────────────────────────────────────────────────
 
@@ -267,7 +268,7 @@ export async function updateEvent(
 ): Promise<CalendarEvent> {
   const token = await refreshAccessToken();
 
-  const tz = patch.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const tz = patch.timeZone ?? getUserTimezone();
   const body = {
     start: { dateTime: patch.start, timeZone: tz },
     end:   { dateTime: patch.end,   timeZone: tz },

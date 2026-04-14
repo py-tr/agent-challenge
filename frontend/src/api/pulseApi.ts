@@ -168,6 +168,12 @@ export const pulseApi = {
       { method: "POST" }
     ),
 
+  resetSync: () =>
+    request<{ success: boolean; message: string }>(
+      `/pulse/reset-sync`,
+      { method: "POST" }
+    ),
+
   sendEmail: (draft: EmailDraftContext, attachDocIds?: string[]) =>
     request<{ success: boolean; messageId: string }>(
       `/pulse/send-email`,
@@ -308,6 +314,9 @@ export const pulseApi = {
       method: "POST",
       body: JSON.stringify({ refreshToken }),
     }),
+
+  logout: () =>
+    request<{ success: boolean }>("/pulse/auth/logout", { method: "POST" }),
 
   uploadDocument: async (file: File): Promise<{ docId: string; filename: string; summary: string; analysis: string; pageCount: number; text: string }> => {
     const arrayBuf = await file.arrayBuffer();

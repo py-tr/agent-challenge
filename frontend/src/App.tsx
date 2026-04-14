@@ -109,6 +109,7 @@ function TopBar({
   onRefresh,
   onProcessInbox,
   processingInbox,
+  onResetSync,
 }: {
   title: string;
   subtitle: string;
@@ -117,6 +118,7 @@ function TopBar({
   onRefresh: () => void;
   onProcessInbox?: () => void;
   processingInbox?: boolean;
+  onResetSync?: () => void;
 }) {
   return (
     <div className="mb-6">
@@ -130,6 +132,16 @@ function TopBar({
             <span className="text-xs text-gray-400">
               {timeAgo(lastUpdated.toISOString())}
             </span>
+          )}
+          {onResetSync && (
+            <button
+              onClick={onResetSync}
+              title="Reset Gmail sync cursor — forces next Sync Now to do a full inbox fetch (use if emails are missing)"
+              className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-600 transition-colors hover:border-amber-300 hover:bg-amber-100 active:scale-95"
+            >
+              <RefreshCw size={12} />
+              Reset Sync
+            </button>
           )}
           {onProcessInbox && (
             <button
@@ -179,10 +191,12 @@ function GoogleAuthBanner({
   status,
   canStartOAuth,
   onDismiss,
+  onLogout,
 }: {
   status: "unconfigured" | "success" | "error";
   canStartOAuth: boolean;
   onDismiss: () => void;
+  onLogout?: () => void;
 }) {
   if (status === "success") {
     return (
@@ -191,9 +205,19 @@ function GoogleAuthBanner({
           <CheckCircle size={15} />
           <span>Google account connected. Gmail &amp; Calendar are ready.</span>
         </div>
-        <button onClick={onDismiss} className="ml-4 text-green-500 hover:text-green-700">
-          <XIcon size={14} />
-        </button>
+        <div className="ml-4 flex items-center gap-2">
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              className="rounded px-2 py-1 text-xs text-green-600 hover:bg-green-100 hover:text-green-800 transition-colors"
+            >
+              Sign out
+            </button>
+          )}
+          <button onClick={onDismiss} className="text-green-500 hover:text-green-700">
+            <XIcon size={14} />
+          </button>
+        </div>
       </div>
     );
   }
@@ -261,6 +285,7 @@ export default function App() {
   // Google OAuth banner
   const [authBanner, setAuthBanner] = useState<"unconfigured" | "success" | "error" | null>(null);
   const [canStartOAuth, setCanStartOAuth] = useState(false);
+  const [isGoogleConnected, setIsGoogleConnected] = useState(false);
 
   // Chat drawer
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -293,6 +318,7 @@ export default function App() {
 
     if (authParam === "success") {
       setAuthBanner("success");
+      setIsGoogleConnected(true);
       // Clean up URL without full reload
       window.history.replaceState({}, "", window.location.pathname);
       return;
@@ -307,6 +333,7 @@ export default function App() {
     pulseApi.getAuthStatus()
       .then(({ configured, canStartOAuth: can }) => {
         setCanStartOAuth(can);
+        setIsGoogleConnected(configured);
         if (!configured) setAuthBanner("unconfigured");
       })
       .catch(() => { /* silently ignore if backend not ready */ });
@@ -643,6 +670,12 @@ export default function App() {
         pendingCount={pending}
         committedCount={committedCount}
         status={status}
+        isGoogleConnected={isGoogleConnected}
+        onLogout={async () => {
+          await pulseApi.logout();
+          setIsGoogleConnected(false);
+          setAuthBanner("unconfigured");
+        }}
       />
 
       <div
@@ -661,6 +694,10 @@ export default function App() {
               status={authBanner}
               canStartOAuth={canStartOAuth}
               onDismiss={() => setAuthBanner(null)}
+              onLogout={async () => {
+                await pulseApi.logout();
+                setAuthBanner("unconfigured");
+              }}
             />
           )}
 
@@ -672,6 +709,10 @@ export default function App() {
             onRefresh={refresh}
             onProcessInbox={view === "queue" ? handleProcessInbox : undefined}
             processingInbox={processingInbox}
+            onResetSync={view === "queue" ? async () => {
+              await pulseApi.resetSync();
+              await handleProcessInbox();
+            } : undefined}
           />
 
           {view === "analytics" && <AnalyticsView />}

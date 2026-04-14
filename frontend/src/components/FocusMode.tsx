@@ -191,8 +191,11 @@ export function FocusMode({
   // Keyboard handling
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      // Let the reject textarea handle its own keys
-      if (document.activeElement === rejectInputRef.current) return;
+      // Don't fire when user is typing anywhere
+      if (
+        document.activeElement instanceof HTMLInputElement ||
+        document.activeElement instanceof HTMLTextAreaElement
+      ) return;
 
       switch (e.key) {
         case "ArrowRight":

@@ -39,6 +39,7 @@ import {
   markReminderSent,
   countByStatus,
   autoExpireSlibReminders,
+  actionItemExistsForGmailMessage,
 } from "../db/queries.js";
 import { actionItems, type Db } from "../db/schema.js";
 import { seedDemoData } from "../lib/seedDemoData.js";
@@ -276,7 +277,7 @@ export class PulseBackgroundService extends Service {
    * Exposed so ProcessEmailsAction and DetectConflictsAction can trigger
    * a fresh cycle on demand (e.g. user asks "process my emails now").
    */
-  async runProcessingCycle(): Promise<CycleResult> {
+  async runProcessingCycle(forceFull = false): Promise<CycleResult> {
     this.cycleCount++;
     const cycleNum  = this.cycleCount;
     const startedAt = Date.now();
@@ -289,7 +290,7 @@ export class PulseBackgroundService extends Service {
     // Run all three stages in parallel where possible, but each independently
     // so one failure never blocks the others.
     const [emailsResult, conflictsResult, remindersResult] = await Promise.all([
-      this.stageEmails(),
+      this.stageEmails(forceFull),
       this.stageCalendar(),
       this.stageReminders(),
     ]);
@@ -331,7 +332,7 @@ export class PulseBackgroundService extends Service {
 
   // ── Stage A: Email processing ─────────────────────────────────────────────
 
-  private async stageEmails(): Promise<StageResult> {
+  private async stageEmails(forceFull = false): Promise<StageResult> {
     try {
       const gmailSvc = this.runtime.getService<GmailMcpService>(
         GmailMcpService.serviceType
@@ -340,7 +341,7 @@ export class PulseBackgroundService extends Service {
         return { processed: 0, inserted: 0, error: "GmailMcpService not available" };
       }
 
-      const classified = await gmailSvc.fetchAndClassify();
+      const classified = await gmailSvc.fetchAndClassify(20, forceFull);
       if (classified.length === 0) {
         return { processed: 0, inserted: 0 };
       }
@@ -357,6 +358,12 @@ export class PulseBackgroundService extends Service {
         }
 
         try {
+          // Dedup: skip if an action item already exists for this Gmail message.
+          if (msg.id && await actionItemExistsForGmailMessage(db, msg.id)) {
+            skipped++;
+            continue;
+          }
+
           await insertActionItem(db, {
             type:     classification.actionItemType,
             title:    msg.subject,

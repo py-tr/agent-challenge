@@ -9,7 +9,7 @@
  *   - All dates written as ISO strings; never Date objects.
  */
 
-import { eq, and, lte, desc, count, isNull, gte, asc, inArray } from "drizzle-orm";
+import { eq, and, lte, desc, count, isNull, gte, asc, inArray, like } from "drizzle-orm";
 import { actionItems, commitments, decisions, type Db } from "./schema.js";
 import {
   rowToActionItem,
@@ -58,6 +58,22 @@ export async function getQueue(db: Db): Promise<ActionItem[]> {
     .orderBy(actionItems.priority, actionItems.createdAt);
 
   return rows.map(rowToActionItem);
+}
+
+/**
+ * Check if an action item with the given Gmail message ID already exists.
+ * Used to deduplicate emails across full-fetch and incremental-sync cycles.
+ */
+export async function actionItemExistsForGmailMessage(
+  db: Db,
+  gmailMessageId: string
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: actionItems.id })
+    .from(actionItems)
+    .where(like(actionItems.metadata, `%"gmailMessageId":"${gmailMessageId}"%`))
+    .limit(1);
+  return rows.length > 0;
 }
 
 export async function getActionItem(
