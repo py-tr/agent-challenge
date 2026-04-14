@@ -21,7 +21,7 @@
 
 ## Demo
 
-🎥 **[Watch 60-second demo video →](https://youtu.be/TODO)**
+🎥 **[Watch demo video →](https://www.youtube.com/watch?v=r3P97mGwUJc)**
 
 **Full flow in 4 steps:**
 1. Email arrives in Gmail → Pulse classifies it and drafts a reply
