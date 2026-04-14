@@ -1,9 +1,10 @@
 # syntax=docker/dockerfile:1
 
-# Use CUDA runtime base so Ollama can see the GPU via NVIDIA Container Toolkit
-FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS base
+# Use the official Ollama image as base — it ships with full CUDA support
+# and is proven to use GPU on Nosana nodes. We install Node.js on top.
+FROM ollama/ollama:latest AS base
 
-# ── System dependencies ────────────────────────────────────────────────────────
+# ── System dependencies + Node.js 23 ─────────────────────────────────────────
 RUN apt-get update && apt-get install -y \
   python3 \
   make \
@@ -12,18 +13,9 @@ RUN apt-get update && apt-get install -y \
   curl \
   unzip \
   ca-certificates \
-  && rm -rf /var/lib/apt/lists/*
-
-# Install Node.js 23
-RUN curl -fsSL https://deb.nodesource.com/setup_23.x | bash - \
+  && curl -fsSL https://deb.nodesource.com/setup_23.x | bash - \
   && apt-get install -y nodejs \
   && rm -rf /var/lib/apt/lists/*
-
-# Install Ollama binary + CUDA runner libraries from official image
-# Copying /usr/lib/ollama/ is required — it contains the CUDA backend (.so files)
-# that the binary dynamically loads. Without it Ollama falls back to CPU.
-COPY --from=ollama/ollama:latest /usr/bin/ollama /usr/local/bin/ollama
-COPY --from=ollama/ollama:latest /usr/lib/ollama/ /usr/lib/ollama/
 
 # Install bun (required by elizaos CLI).
 RUN curl -fsSL https://bun.sh/install | bash && \
@@ -56,15 +48,10 @@ RUN cd frontend && pnpm install --frozen-lockfile
 COPY . .
 
 # ── Build ─────────────────────────────────────────────────────────────────────
-# 1. Compile TypeScript → /app/dist/
 RUN pnpm compile
 
-# 2. Build React frontend to /srv/pulse-frontend/ — outside /app so
-#    the Nosana volume mount cannot wipe it at runtime.
 RUN mkdir -p /srv/pulse-frontend
 RUN cd frontend && pnpm run build
-
-# Verify the static files are where we expect them.
 RUN ls -la /srv/pulse-frontend/
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
@@ -73,14 +60,11 @@ RUN mkdir -p /app/data
 EXPOSE 3000
 EXPOSE 11434
 
-# Copy entrypoint script
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Store Ollama models outside /app to avoid Nosana volume mount conflicts
 ENV OLLAMA_MODELS=/var/ollama/models
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=300s --retries=5 \
   CMD curl -f http://localhost:3000/pulse/status || exit 1
 
