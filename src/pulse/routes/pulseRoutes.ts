@@ -2258,7 +2258,7 @@ export const pulseRoutes: Route[] = [
   {
     type: "GET" as const,
     path: "/auth/google",
-    handler: async (_req: RouteRequest, res: RouteResponse, _runtime: IAgentRuntime) => {
+    handler: async (req: RouteRequest, res: RouteResponse, _runtime: IAgentRuntime) => {
       const clientId = process.env.GOOGLE_CLIENT_ID;
       const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
 
@@ -2270,7 +2270,18 @@ export const pulseRoutes: Route[] = [
       }
 
       const port = process.env.SERVER_PORT ?? "3000";
-      const pulseOrigin = process.env.PULSE_PUBLIC_URL ?? `http://localhost:${port}`;
+      // Prefer explicit env var; fall back to detecting origin from request headers
+      // so Nosana dynamic node URLs work without hardcoding PULSE_PUBLIC_URL.
+      const pulseOrigin = process.env.PULSE_PUBLIC_URL ?? (() => {
+        const headers = req.headers as Record<string, string | string[] | undefined>;
+        const fwdHost = headers["x-forwarded-host"];
+        const host = (Array.isArray(fwdHost) ? fwdHost[0] : fwdHost) ?? (headers["host"] as string | undefined);
+        const proto = (headers["x-forwarded-proto"] as string | undefined)?.split(",")[0]?.trim() ?? "http";
+        if (host && !host.startsWith("localhost") && !host.startsWith("127.")) {
+          return `${proto}://${host}`;
+        }
+        return `http://localhost:${port}`;
+      })();
 
       // Static relay hosted on GitHub Pages — registered once in Google Cloud Console.
       // Receives the callback and forwards the code back to this Pulse instance via state.
