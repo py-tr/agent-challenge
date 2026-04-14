@@ -39,7 +39,7 @@ async function ollamaCompletion(params: LlmParams): Promise<string> {
       temperature: params.temperature ?? 0.7,
       stream:      false,
     }),
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(120_000),
   });
 
   if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
