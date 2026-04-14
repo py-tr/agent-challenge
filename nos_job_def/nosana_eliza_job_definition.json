@@ -12,15 +12,24 @@
           "SERVER_PORT": "3000",
           "NODE_ENV": "production",
           "TZ": "Europe/Prague",
-          "PULSE_SEED_ON_START": "true",
+          "PULSE_JOB_TYPE": "morning",
           "EMBEDDING_PROVIDER": "none",
+          "PULSE_SEED_ON_START": "true",
+
           "OLLAMA_MODEL": "qwen2.5:14b",
           "OLLAMA_BASE_URL": "http://localhost:11434/v1",
+          "SKIP_OLLAMA": "false",
+
           "OPENAI_API_KEY": "nosana",
-          "OPENAI_API_URL": "TODO: replace with your Nosana node endpoint URL (e.g. https://<node-id>.node.k8s.prd.nos.ci/v1)",
+          "OPENAI_API_URL": "",
           "OPENAI_SMALL_MODEL": "qwen2.5:14b",
           "OPENAI_LARGE_MODEL": "qwen2.5:14b",
-          "SKIP_OLLAMA": "false"
+
+          "GOOGLE_CLIENT_ID": "",
+          "GOOGLE_CLIENT_SECRET": "",
+          "GOOGLE_REFRESH_TOKEN": "",
+
+          "USER_NAME": ""
         }
       }
     }
